@@ -1,26 +1,96 @@
 @import "tailwindcss";
 
+/*
+ * Design tokens — mirrors the Figma file's variables/styles.
+ * Source: PropMatch AI Figma Prototype Generation Prompt, Section 1 & 5.
+ * Do not add ad-hoc color/spacing values in components — extend tokens here instead.
+ */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  /* Brand */
+  --color-primary: #0e7c86;
+  --color-primary-dark: #0b5f67;
+  --color-primary-tint: #e6f4f5;
+
+  /* Trust accent */
+  --color-trust-blue: #1f6feb;
+  --color-trust-blue-tint: #e7f0fe;
+
+  /* State colors */
+  --color-success: #16a34a;
+  --color-success-tint: #dcfce7;
+  --color-pending: #d97706;
+  --color-pending-tint: #fef3c7;
+  --color-error: #dc2626;
+  --color-error-tint: #fee2e2;
+
+  /* Neutrals */
+  --color-ink: #0f172a;
+  --color-body-text: #334155;
+  --color-muted: #64748b;
+  --color-hairline: #e2e8f0;
+  --color-background: #f7fafb;
+  --color-surface: #ffffff;
+
+  /* Radius */
+  --radius-card: 16px;
+  --radius-control: 12px;
+  --radius-pill: 9999px;
+
+  /* Shadows */
+  --shadow-card: 0 1px 2px rgba(15, 23, 42, 0.06), 0 4px 12px rgba(15, 23, 42, 0.06);
+  --shadow-sheet: 0 -8px 24px rgba(15, 23, 42, 0.12);
+
+  /* Scrim for bottom sheets / modals */
+  --color-scrim: rgba(15, 23, 42, 0.45);
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
+  --color-primary: var(--color-primary);
+  --color-primary-dark: var(--color-primary-dark);
+  --color-primary-tint: var(--color-primary-tint);
+  --color-trust-blue: var(--color-trust-blue);
+  --color-trust-blue-tint: var(--color-trust-blue-tint);
+  --color-success: var(--color-success);
+  --color-success-tint: var(--color-success-tint);
+  --color-pending: var(--color-pending);
+  --color-pending-tint: var(--color-pending-tint);
+  --color-error: var(--color-error);
+  --color-error-tint: var(--color-error-tint);
+  --color-ink: var(--color-ink);
+  --color-body-text: var(--color-body-text);
+  --color-muted: var(--color-muted);
+  --color-hairline: var(--color-hairline);
+  --color-background: var(--color-background);
+  --color-surface: var(--color-surface);
+  --color-scrim: var(--color-scrim);
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  --radius-card: var(--radius-card);
+  --radius-control: var(--radius-control);
+  --radius-pill: var(--radius-pill);
+
+  --shadow-card: var(--shadow-card);
+  --shadow-sheet: var(--shadow-sheet);
+
+  --font-sans: var(--font-cairo);
+
+  /* Type scale — Cairo, right-aligned by default (see app/layout.tsx dir="rtl") */
+  --text-display: 2rem;
+  --text-display--line-height: 1.75;
+  --text-h1: 1.5rem;
+  --text-h1--line-height: 1.7;
+  --text-h2: 1.25rem;
+  --text-h2--line-height: 1.7;
+  --text-title: 1.125rem;
+  --text-title--line-height: 1.7;
+  --text-body: 1rem;
+  --text-body--line-height: 1.7;
+  --text-small: 0.875rem;
+  --text-small--line-height: 1.6;
+  --text-caption: 0.75rem;
+  --text-caption--line-height: 1.6;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--color-background);
+  color: var(--color-ink);
 }

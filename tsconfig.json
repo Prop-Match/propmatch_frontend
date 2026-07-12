@@ -30,5 +30,12 @@
     ".next/dev/types/**/*.ts",
     "**/*.mts"
   ],
-  "exclude": ["node_modules"]
+  "exclude": [
+    "node_modules",
+    "reference",
+    "jest.config.ts",
+    "jest.setup.ts",
+    "jest.polyfills.ts",
+    "**/__tests__/**"
+  ]
 }

@@ -1,0 +1,31 @@
+# Assumptions log
+
+Living document. Every assumption made in the absence of the ERD, form
+specs (beyond what's already in the UI Generation Prompt), and NestJS
+OpenAPI spec. Update or remove entries once the real source of truth
+confirms or overrides them — don't let this drift out of date.
+
+| # | Assumption | Source of gap | How to confirm |
+|---|---|---|---|
+| 1 | No NestJS backend exists yet; frontend built against MSW mocks in `src/mocks/` mirroring contracts inferred from the SRS. | No backend repo/OpenAPI in the workspace. | Confirm with the team whether/when a NestJS repo will exist, and whether it lives alongside this frontend or separately. |
+| 2 | Repo shape is a single Next.js app (not a pnpm/Turborepo monorepo) — contracts live in `src/lib/api/contracts` instead of a separate `packages/contracts`. | User decision this session (no second package to isolate yet). | Revisit if/when the NestJS backend is added to this same repo — extracting `src/lib/api/contracts` into a workspace package is a mechanical move at that point. |
+| 3 | Three-way role choice at signup (مستأجر / مالك / الاثنين), per the UI Generation Prompt — supersedes an earlier draft's "unified account, switch later" model found in `reference/figma-tenant-prototype/src/imports/`. | Two conflicting design-spec drafts in the workspace. | If the team intended the unified-account model instead, `AccountRoleSchema` and the signup flow need to change. |
+| 4 | Quota counters (`match`, `form-optimizer`, `listing`) are lifetime/never-reset, only incremented via Paymob top-up. | SRS FR2.5/FR3.4 give example numbers but never state a reset cadence. | Confirm with team: is there a monthly/periodic quota reset, or is it purely pay-to-increase? |
+| 5 | Match score is treated as volatile (not cached client-side beyond the active query session). | SRS FR2.4 doesn't specify whether score is deterministic/stable for a given tenant-property pair. | Confirm with backend/RAG design once built. |
+| 6 | PII reveal ("both parties accept") flow: tenant requests contact → landlord's Inquiries list shows the request → landlord opens/accepts → PII unlocks both ways. | UI Generation Prompt specifies the *rule* (reveal after both accept) but not the *UI flow* that produces "acceptance." | Needs explicit product confirmation — flagged in `docs/analysis/requirements.md`. Build V1 per this assumption but keep the accept step visually explicit so it's easy to correct. |
+| 7 | No in-app tenant↔landlord messaging in V1 — "contact owner" reveals a phone number; further contact happens off-platform. | Only the earlier (superseded) draft explicitly excludes messaging; the authoritative UI prompt doesn't mention an in-app chat screen at all. | Confirm messaging is genuinely out of scope, not just omitted from the prompt by oversight. |
+| 8 | Paymob "success" state in the UI means "payment captured," not "entitlement activated" — the client polls the entitlement briefly after Paymob reports success, to cover the webhook race. | SRS FR6.2/6.3 describe webhook-driven activation but the design spec's payment modal shows an immediate client-side success state. | Confirm the real webhook's typical latency with the team once Paymob integration exists, to tune the polling window. |
+| 9 | AuditLog is backend-owned, append-only, no frontend edit/delete UI — filter/search/export only. | Not mentioned in the SRS at all; inferred from RBAC/security best practice given the sensitive actions it covers. | Confirm this is actually how the backend will implement it. |
+| 10 | eKYC verification *results* (name, ID number, confidence) are retained indefinitely while the account is active; raw images are deleted per FR1.5 (already specified). | SRS doesn't state retention policy for the extracted result, only the raw images. | Legal/compliance question for the team, not purely technical. |
+| 11 | Concurrent admin approval on the same listing: backend returns 409 on the second writer; frontend refetches + toasts rather than retrying. | Not specified; inferred to prevent double-processing. | Confirm the backend actually implements this compare-and-swap semantic. |
+| 12 | RBAC starting role set (Super Admin, Listings Manager, eKYC Reviewer, Finance Admin, Reviews Manager, Customer Support, Read-only Viewer) and capability matrix in `docs/analysis/rbac.md`. | No role list provided by the team yet. | Confirm against however the team is actually staffing the ~3–10 internal admins. |
+| 13 | `pii:reveal` granted to Customer Support (scoped + audited) in addition to Super Admin. | Judgment call to make support workable; flagged as security-sensitive. | Explicit confirmation recommended before shipping — this is the one place a non-Super-Admin role touches raw PII outside the match-consent flow. |
+| 14 | Auth cookie lifetimes: access token 1h, refresh token 7d (`src/lib/api/cookies.ts`). | SRS NFR1.2 gives these as an example ("e.g."), not a hard requirement. | Confirm exact values with backend team; trivial to change in one file. |
+| 15 | Numeric/date formatting must explicitly force `numberingSystem: "latn"` for `ar-EG` `Intl` calls, since the bare locale defaults to Eastern Arabic-Indic digits. | Not a spec gap — a factual Intl API behavior worth flagging so it isn't rediscovered as a bug later. | N/A — verify in the shared formatting util once built (Phase 3). |
+
+## Non-assumptions (explicitly out of scope, confirmed by multiple sources)
+
+Maps/GPS, in-app scheduling/booking, points/wallet/bundle economy,
+rent-collection/escrow/BNPL, title-deed ownership verification,
+conversational AI contract drafting. All addresses are plain text. See the
+UI Generation Prompt Section 9 for the canonical list.

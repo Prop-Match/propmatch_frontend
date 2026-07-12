@@ -1,0 +1,98 @@
+{
+  "brand": {
+    "name": "PropMatch AI",
+    "tagline": "استأجر مباشرة من المالك. بدون سمسار، وبدون عمولة.",
+    "noBrokerCommission": "بدون عمولة سمسار"
+  },
+  "roles": {
+    "tenant": "مستأجر",
+    "landlord": "مالك",
+    "admin": "مشرف",
+    "both": "الاثنين"
+  },
+  "auth": {
+    "signUp": "إنشاء حساب",
+    "logIn": "تسجيل الدخول",
+    "fullName": "الاسم بالكامل",
+    "email": "البريد الإلكتروني",
+    "phone": "رقم الهاتف",
+    "password": "كلمة المرور",
+    "roleChoiceTenant": "أبحث عن سكن",
+    "roleChoiceLandlord": "أعرض عقاري"
+  },
+  "trust": {
+    "verifiedIdentity": "هوية موثّقة",
+    "verifiedOwner": "مالك موثّق الهوية",
+    "ownershipDisclaimer": "يتم التحقق من هوية المستخدم فقط، أما ملكية العقار فيُقرّ بها المالك على مسؤوليته."
+  },
+  "ekyc": {
+    "nationalId": "الرقم القومي",
+    "nationalIdCard": "بطاقة الرقم القومي",
+    "idFront": "وجه البطاقة الأمامي",
+    "idBack": "وجه البطاقة الخلفي",
+    "selfieLiveness": "صورة شخصية للتحقق (تحقق حي)",
+    "attemptsRemaining": "المحاولات المتبقية"
+  },
+  "listing": {
+    "addProperty": "إضافة عقار",
+    "listing": "إعلان",
+    "statusPending": "قيد المراجعة",
+    "statusApproved": "تمت الموافقة",
+    "statusRejected": "مرفوض",
+    "rent": "الإيجار",
+    "perMonth": "شهريًا",
+    "area": "المساحة (م²)",
+    "furnished": "مفروش",
+    "bedrooms": "غرف النوم",
+    "bathrooms": "الحمّامات",
+    "amenities": "المميزات",
+    "description": "الوصف",
+    "optimizeDescription": "تحسين الوصف",
+    "optimizeDescriptionHelper": "حوّل وصفك إلى نص تسويقي احترافي.",
+    "freeUsesLeft": "الاستخدامات المجانية المتبقية",
+    "boost": "تمييز الإعلان",
+    "boosted": "مميّز",
+    "firstListingFree": "أول إعلان مجانًا"
+  },
+  "matching": {
+    "smartMatching": "المطابقة الذكية",
+    "cta": "ابحث عن سكنك",
+    "budget": "الميزانية",
+    "lifestyle": "نمط الحياة",
+    "preferences": "التفضيلات",
+    "matchScore": "نسبة التطابق",
+    "matchScoreTooltip": "تطابق {score}%",
+    "freeMatchesLeft": "محاولات المطابقة المجانية المتبقية",
+    "quotaExhausted": "انتهت محاولاتك المجانية",
+    "getMoreMatches": "احصل على محاولات إضافية",
+    "idealPropertyPrompt": "صف العقار المثالي بالنسبة لك"
+  },
+  "contact": {
+    "contactOwner": "تواصل مع المالك",
+    "phoneHidden": "رقم الهاتف مخفي حتى تأكيد التطابق"
+  },
+  "legal": {
+    "legalAssistant": "المساعد القانوني",
+    "offTopicDecline": "أقدر أساعدك فقط في أسئلة الإيجار والقانون العقاري في مصر."
+  },
+  "contract": {
+    "createContract": "إنشاء العقد",
+    "lease": "عقد الإيجار",
+    "additionalClauses": "بنود إضافية متفق عليها",
+    "downloadPdf": "تحميل العقد PDF"
+  },
+  "payment": {
+    "payPerListingFee": "رسوم إضافة إعلان",
+    "payment": "الدفع",
+    "payViaPaymob": "ادفع عبر Paymob",
+    "success": "تم الدفع بنجاح",
+    "failure": "فشلت عملية الدفع، حاول مرة أخرى"
+  },
+  "admin": {
+    "approve": "موافقة",
+    "reject": "رفض",
+    "newUserNeedsReview": "مستخدم جديد بحاجة لمراجعة",
+    "justNow": "منذ لحظة",
+    "aMinuteAgo": "منذ دقيقة"
+  }
+}
