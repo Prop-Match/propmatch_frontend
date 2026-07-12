@@ -17,9 +17,23 @@ npm run dev
 ```
 
 Open [http://localhost:3000](http://localhost:3000). With the default
-`.env.local` (`API_MOCKING=enabled`), the BFF Route Handlers under
-`app/api/**` are served by the MSW mocks in `src/mocks/` — no backend
-required.
+`.env.local` (`API_MOCKING=enabled`), a standalone in-process mock backend
+(`src/mocks/`) starts on the `NESTJS_API_URL` port and serves every endpoint
+— no real backend required. Seeded demo logins (any password ≥ 8 chars):
+
+- `tenant@example.com` — tenant
+- `landlord@example.com` — verified landlord
+- `both@example.com` — dual-role
+- `admin@example.com` — admin dashboard
+
+### What's implemented
+
+Auth (3-way role signup) · eKYC wizard (lock-after-3) · tenant browse +
+PII-gated contact · smart matching (hybrid intake + RAG field, score rings,
+quota paywall) · landlord dashboard + multi-step add-property wizard (AI
+optimize, first-free/Paymob) + boost + inquiries · reusable Paymob payment
+sheet · contract generator (form → PDF) · legal chatbot (on-topic guardrail)
+· admin live queues + property/eKYC review · profile + dual-role switch.
 
 ## Scripts
 

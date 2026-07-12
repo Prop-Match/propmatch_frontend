@@ -42,15 +42,25 @@ stand in for it).
 
 ## Repo layout
 
-- `app/` — Next.js App Router routes + BFF Route Handlers (`app/api/**`).
-- `src/lib/api/` — `client.ts` (server-only NestJS fetch wrapper),
-  `cookies.ts` (httpOnly auth cookies), `contracts/` (Zod DTOs mirroring the
-  backend).
-- `src/mocks/` — MSW handlers mirroring every contract; wired into the server
-  runtime via `instrumentation.ts` when `API_MOCKING=enabled`, and into Jest
-  via `jest.setup.ts`.
-- `src/features/`, `src/components/`, `src/hooks/`, `src/types/`,
-  `src/utils/` — feature-based architecture, see `src/features/README.md`.
+- `app/` — Next.js App Router routes (route groups `(auth)`, `(tenant)`,
+  `(landlord)`, `(admin)`, `(shared)`) + BFF Route Handlers (`app/api/**`):
+  `auth/*` mint/clear cookies, `backend/[...path]` is a generic proxy that
+  attaches the httpOnly token and forwards to the backend.
+- `src/lib/api/` — `client.ts` (server-only backend fetch wrapper),
+  `browserClient.ts` (client → own Route Handlers), `cookies.ts` (httpOnly
+  auth cookies), `serverSession.ts` (RSC session via `/api/auth/me`),
+  `contracts/` (Zod DTOs mirroring the backend, one file per module).
+- `src/mocks/` — the standalone mock backend: `router.ts` (framework-agnostic
+  dispatcher, single source of truth for mock behaviour), `standalone.ts`
+  (real HTTP server on the `NESTJS_API_URL` port, started by
+  `instrumentation.ts` when `API_MOCKING=enabled`), `db.ts` (in-memory seed),
+  and `handlers.ts` (one MSW passthrough → `router.ts`, for Jest only).
+- `src/features/` — one folder per module (`auth`, `listings`, `matching`,
+  `landlord`, `ekyc`, `payments`, `contracts`, `legal`, `admin`, `profile`),
+  each with components/hooks/services/validation/types/tests. See
+  `src/features/README.md`.
+- `src/components/` (design-system primitives + nav), `src/utils/`
+  (formatting, cn), `src/types/`.
 - `src/lib/store/` — Zustand stores for client-only UI state (never
   entitlements — those are server-authoritative).
 - `proxy.ts` (Next.js 16's renamed `middleware.ts`) — coarse auth-gate redirect only; real authorization is

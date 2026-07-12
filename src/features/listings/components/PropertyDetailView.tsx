@@ -12,7 +12,16 @@ import { ErrorState } from "@/src/components/ui/States";
 import { formatEGP, formatNumber } from "@/src/utils/format";
 import { amenityLabels, propertyTypeLabels, finishLabels, orientationLabels } from "@/src/lib/api/contracts/property";
 
-export function PropertyDetailView({ id, matchScore }: { id: string; matchScore?: number }) {
+export function PropertyDetailView({
+  id,
+  matchScore,
+  hideContact,
+}: {
+  id: string;
+  matchScore?: number;
+  /** True when the owner is viewing their own listing — no contact gate. */
+  hideContact?: boolean;
+}) {
   const { data: p, isLoading, isError, refetch } = useProperty(id);
 
   if (isError) return <ErrorState onRetry={() => refetch()} />;
@@ -123,10 +132,12 @@ export function PropertyDetailView({ id, matchScore }: { id: string; matchScore?
         )}
       </div>
 
-      {/* Contact gate — sticky on desktop */}
-      <aside className="lg:sticky lg:top-20 lg:h-fit">
-        <ContactGate propertyId={p.id} />
-      </aside>
+      {/* Contact gate — sticky on desktop; hidden for the owner's own view */}
+      {!hideContact && (
+        <aside className="lg:sticky lg:top-20 lg:h-fit">
+          <ContactGate propertyId={p.id} />
+        </aside>
+      )}
     </div>
   );
 }

@@ -1,0 +1,129 @@
+"use client";
+
+import { useState, useRef, useEffect } from "react";
+import { Scale, Send, MessageCircle } from "lucide-react";
+import { api } from "@/src/lib/api/browserClient";
+import { cn } from "@/src/utils/cn";
+import type { ChatMessage } from "@/src/lib/api/contracts/support";
+
+const examples = [
+  "ما هي مدة الإخطار قبل إنهاء العقد؟",
+  "هل يحق للمالك زيادة الإيجار سنويًا؟",
+  "ما حقوقي كمستأجر عند تأخر الصيانة؟",
+];
+
+let localId = 0;
+
+export function LegalChatbot() {
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [input, setInput] = useState("");
+  const [typing, setTyping] = useState(false);
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
+  }, [messages, typing]);
+
+  async function send(text: string) {
+    const trimmed = text.trim();
+    if (!trimmed || typing) return;
+    setInput("");
+    setMessages((m) => [...m, { id: `local_${localId++}`, role: "user", content: trimmed }]);
+    setTyping(true);
+    try {
+      const reply = await api.post<ChatMessage>("legal-chat", { message: trimmed });
+      setMessages((m) => [...m, reply]);
+    } catch {
+      setMessages((m) => [
+        ...m,
+        { id: `local_${localId++}`, role: "assistant", content: "تعذر الاتصال، حاول مرة أخرى." },
+      ]);
+    } finally {
+      setTyping(false);
+    }
+  }
+
+  return (
+    <div className="mx-auto flex h-[calc(100dvh-8rem)] max-w-2xl flex-col gap-3">
+      <div className="flex items-center gap-2">
+        <span className="flex size-10 items-center justify-center rounded-full bg-primary-tint text-primary">
+          <Scale className="size-5" aria-hidden />
+        </span>
+        <div>
+          <h1 className="text-title font-bold text-ink">المساعد القانوني</h1>
+          <p className="text-caption text-muted">أسئلة الإيجار والقانون العقاري في مصر</p>
+        </div>
+      </div>
+
+      <div ref={scrollRef} className="flex flex-1 flex-col gap-3 overflow-y-auto rounded-card border border-hairline bg-surface p-4">
+        {messages.length === 0 && (
+          <div className="flex flex-1 flex-col items-center justify-center gap-4 text-center">
+            <MessageCircle className="size-10 text-muted" aria-hidden />
+            <p className="text-small text-muted">اسأل عن أي شيء يخص الإيجار والقانون العقاري في مصر</p>
+            <div className="flex flex-col gap-2">
+              {examples.map((ex) => (
+                <button
+                  key={ex}
+                  onClick={() => send(ex)}
+                  className="rounded-pill border border-hairline px-4 py-1.5 text-small text-body-text hover:border-primary hover:text-primary"
+                >
+                  {ex}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {messages.map((m) => (
+          <div key={m.id} className={cn("flex", m.role === "user" ? "justify-start" : "justify-end")}>
+            <div
+              className={cn(
+                "max-w-[85%] rounded-card px-4 py-2.5 text-body leading-relaxed",
+                m.role === "user"
+                  ? "bg-primary text-white"
+                  : m.declined
+                    ? "bg-pending-tint text-body-text"
+                    : "bg-background text-ink",
+              )}
+            >
+              {m.content}
+            </div>
+          </div>
+        ))}
+
+        {typing && (
+          <div className="flex justify-end">
+            <div className="flex gap-1 rounded-card bg-background px-4 py-3">
+              {[0, 1, 2].map((i) => (
+                <span key={i} className="size-2 animate-bounce rounded-full bg-muted" style={{ animationDelay: `${i * 0.15}s` }} />
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          send(input);
+        }}
+        className="flex items-center gap-2"
+      >
+        <input
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          placeholder="اكتب سؤالك…"
+          className="flex-1 rounded-pill border border-hairline bg-surface px-4 py-2.5 text-body focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+        />
+        <button
+          type="submit"
+          disabled={!input.trim() || typing}
+          className="flex size-11 shrink-0 items-center justify-center rounded-full bg-primary text-white disabled:opacity-50"
+          aria-label="إرسال"
+        >
+          <Send className="size-5 rtl:-scale-x-100" aria-hidden />
+        </button>
+      </form>
+    </div>
+  );
+}

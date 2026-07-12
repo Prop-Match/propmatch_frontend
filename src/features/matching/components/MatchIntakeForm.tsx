@@ -65,7 +65,11 @@ export function MatchIntakeForm({ onSubmit, submitting }: { onSubmit: (v: MatchI
     }
   }, [reset]);
 
+  // RHF's documented draft-autosave pattern: subscribe to watch() in an
+  // effect with cleanup. The React Compiler lint warning here is a known
+  // false positive for this exact usage.
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/incompatible-library
     const sub = watch((value) => {
       window.localStorage.setItem(DRAFT_KEY, JSON.stringify(value));
     });
