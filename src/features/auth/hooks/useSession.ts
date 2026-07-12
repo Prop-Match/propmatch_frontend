@@ -1,0 +1,54 @@
+"use client";
+
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useRouter } from "next/navigation";
+import { authApi, isApiClientError } from "@/src/lib/api/browserClient";
+import type { AuthResponse, LoginRequest, RegisterRequest, User } from "@/src/lib/api/contracts/auth";
+
+const SESSION_KEY = ["session"] as const;
+
+/** Current user, or null when unauthenticated (401 is treated as "no session"). */
+export function useSession() {
+  return useQuery({
+    queryKey: SESSION_KEY,
+    queryFn: async (): Promise<User | null> => {
+      try {
+        const res = await authApi.me<AuthResponse>();
+        return res.user;
+      } catch (e) {
+        if (isApiClientError(e) && e.statusCode === 401) return null;
+        throw e;
+      }
+    },
+    staleTime: 60_000,
+  });
+}
+
+export function useLogin() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: LoginRequest) => authApi.login<AuthResponse>(body),
+    onSuccess: (res) => qc.setQueryData(SESSION_KEY, res.user),
+  });
+}
+
+export function useRegister() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: RegisterRequest) => authApi.register<AuthResponse>(body),
+    onSuccess: (res) => qc.setQueryData(SESSION_KEY, res.user),
+  });
+}
+
+export function useLogout() {
+  const qc = useQueryClient();
+  const router = useRouter();
+  return useMutation({
+    mutationFn: () => authApi.logout(),
+    onSuccess: () => {
+      qc.setQueryData(SESSION_KEY, null);
+      qc.clear();
+      router.push("/");
+    },
+  });
+}

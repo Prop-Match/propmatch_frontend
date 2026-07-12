@@ -14,6 +14,12 @@ export class BackendApiError extends Error {
   constructor(
     public statusCode: number,
     message: string,
+    /**
+     * Full parsed error body. Preserved so callers (e.g. the BFF proxy) can
+     * forward domain-specific error payloads like the quota-exhausted 403
+     * that carries { trigger, product, priceEgp } — see SRS FR2.5.
+     */
+    public body?: unknown,
   ) {
     super(message);
     this.name = "BackendApiError";
@@ -50,13 +56,14 @@ export async function backendFetch<T>(path: string, options: BackendFetchOptions
   });
 
   if (!response.ok) {
-    const parsed = ApiErrorSchema.safeParse(await response.json().catch(() => null));
+    const rawBody = await response.json().catch(() => null);
+    const parsed = ApiErrorSchema.safeParse(rawBody);
     const message = parsed.success
       ? Array.isArray(parsed.data.message)
         ? parsed.data.message.join(", ")
         : parsed.data.message
       : response.statusText;
-    throw new BackendApiError(response.status, message);
+    throw new BackendApiError(response.status, message, rawBody);
   }
 
   if (response.status === 204) {
