@@ -33,7 +33,10 @@ PII-gated contact · smart matching (hybrid intake + RAG field, score rings,
 quota paywall) · landlord dashboard + multi-step add-property wizard (AI
 optimize, first-free/Paymob) + boost + inquiries · reusable Paymob payment
 sheet · contract generator (form → PDF) · legal chatbot (on-topic guardrail)
-· admin live queues + property/eKYC review · profile + dual-role switch.
+· admin live queues + property/eKYC review + financial reports · AI-first
+customer support with human escalation (tickets) · admin & RBAC management
+(team, roles, capability gating, audit log + login history) · profile +
+dual-role switch.
 
 ## Scripts
 

@@ -3,6 +3,9 @@ import type { PropertyDetail } from "@/src/lib/api/contracts/property";
 import type { ContactRequestStatus } from "@/src/lib/api/contracts/match";
 import type { PaymentContext, PaymentStatus } from "@/src/lib/api/contracts/payment";
 import type { KycStep } from "@/src/lib/api/contracts/verification";
+import type { SupportAuthor, TicketStatus } from "@/src/lib/api/contracts/support";
+import { ROLE_CAPABILITIES, type AdminRole } from "@/src/lib/api/contracts/admin";
+import type { Capability } from "@/src/lib/api/contracts/common";
 
 /**
  * In-memory mock database standing in for the NestJS backend. State lives for
@@ -27,6 +30,50 @@ export interface MockUser extends User {
     optimizerLimit: number;
     freeListingUsed: boolean;
   };
+  /** Set only for role === "admin": their RBAC role + derived capabilities. */
+  adminRole?: AdminRole;
+  capabilities?: Capability[];
+  disabled?: boolean;
+  lastLoginAt?: string | null;
+}
+
+export interface MockSupportMessage {
+  id: string;
+  author: SupportAuthor;
+  authorName: string;
+  content: string;
+  internal: boolean;
+  at: string;
+}
+
+export interface MockTicket {
+  id: string;
+  userId: string;
+  subject: string;
+  status: TicketStatus;
+  assignedAdminId: string | null;
+  /** True once the user requested a human agent. */
+  escalated: boolean;
+  messages: MockSupportMessage[];
+  createdAt: string;
+  lastMessageAt: string;
+}
+
+export interface MockAuditEntry {
+  id: string;
+  actorId: string;
+  actorName: string;
+  action: string;
+  subjectId: string;
+  at: string;
+}
+
+export interface MockLoginEntry {
+  id: string;
+  adminName: string;
+  ip: string;
+  at: string;
+  success: boolean;
 }
 
 export interface MockInquiry {
@@ -63,6 +110,7 @@ function makeUser(
   email: string,
   role: AccountRole,
   verificationStatus: VerificationStatus,
+  adminRole?: AdminRole,
 ): MockUser {
   return {
     id,
@@ -80,6 +128,9 @@ function makeUser(
       matchConfidence: verificationStatus === "verified" ? 94 : null,
     },
     quotas: { matchUsed: 0, matchLimit: 3, optimizerUsed: 0, optimizerLimit: 2, freeListingUsed: false },
+    ...(adminRole
+      ? { adminRole, capabilities: ROLE_CAPABILITIES[adminRole], disabled: false, lastLoginAt: null }
+      : {}),
   };
 }
 
@@ -142,7 +193,9 @@ export interface MockDb {
   inquiries: MockInquiry[];
   payments: MockPayment[];
   kycSubmissions: MockKycSubmission[];
-  auditLog: { actorId: string; action: string; subjectId: string; at: string }[];
+  tickets: MockTicket[];
+  auditLog: MockAuditEntry[];
+  loginHistory: MockLoginEntry[];
 }
 
 function seed(): MockDb {
@@ -150,8 +203,12 @@ function seed(): MockDb {
     makeUser("usr_tenant", "أحمد محمود", "tenant@example.com", "tenant", "unverified"),
     makeUser("usr_landlord", "محمد السيد", "landlord@example.com", "landlord", "verified"),
     makeUser("usr_both", "سارة إبراهيم", "both@example.com", "both", "unverified"),
-    makeUser("usr_admin", "مشرف المنصة", "admin@example.com", "admin", "verified"),
+    makeUser("usr_admin", "مشرف المنصة", "admin@example.com", "admin", "verified", "super-admin"),
     makeUser("usr_landlord2", "خالد عبد العزيز", "landlord2@example.com", "landlord", "pending"),
+    // Additional admin team members (managed via /admin/team).
+    makeUser("usr_admin2", "منى فؤاد", "support@example.com", "admin", "verified", "customer-support"),
+    makeUser("usr_admin3", "طارق حسن", "listings@example.com", "admin", "verified", "listings-manager"),
+    makeUser("usr_admin4", "ليلى عادل", "viewer@example.com", "admin", "verified", "read-only"),
   ];
 
   const properties: PropertyDetail[] = [
@@ -224,7 +281,29 @@ function seed(): MockDb {
     ],
     payments: [],
     kycSubmissions: [{ userId: "usr_landlord2", submittedAt: new Date(Date.now() - 8 * 60_000).toISOString(), reviewed: false }],
+    tickets: [
+      {
+        id: "tkt_1",
+        userId: "usr_landlord",
+        subject: "مشكلة في رفع صور العقار",
+        status: "new",
+        assignedAdminId: null,
+        escalated: true,
+        createdAt: new Date(Date.now() - 30 * 60_000).toISOString(),
+        lastMessageAt: new Date(Date.now() - 12 * 60_000).toISOString(),
+        messages: [
+          { id: "m1", author: "user", authorName: "محمد السيد", content: "لا أستطيع رفع أكثر من صورة واحدة للعقار.", internal: false, at: new Date(Date.now() - 30 * 60_000).toISOString() },
+          { id: "m2", author: "ai", authorName: "المساعد الآلي", content: "تأكد أن حجم كل صورة أقل من 5 ميجابايت وبصيغة JPG أو PNG. هل ما زالت المشكلة قائمة؟", internal: false, at: new Date(Date.now() - 28 * 60_000).toISOString() },
+          { id: "m3", author: "user", authorName: "محمد السيد", content: "نعم ما زالت، أريد التحدث مع موظف.", internal: false, at: new Date(Date.now() - 12 * 60_000).toISOString() },
+        ],
+      },
+    ],
     auditLog: [],
+    loginHistory: [
+      { id: "lh1", adminName: "مشرف المنصة", ip: "197.35.10.4", at: new Date(Date.now() - 60 * 60_000).toISOString(), success: true },
+      { id: "lh2", adminName: "منى فؤاد", ip: "156.200.44.9", at: new Date(Date.now() - 3 * 60 * 60_000).toISOString(), success: true },
+      { id: "lh3", adminName: "طارق حسن", ip: "41.33.8.71", at: new Date(Date.now() - 26 * 60 * 60_000).toISOString(), success: false },
+    ],
   };
 }
 
@@ -264,6 +343,18 @@ export function tokensFor(user: MockUser) {
     refreshToken: fakeJwt(user.id, 60 * 60 * 24 * 7),
     user: toPublicUser(user),
   };
+}
+
+/** Append-only audit entry (AuditLog is never mutated — see ASSUMPTIONS.md #9). */
+export function pushAudit(actor: MockUser, action: string, subjectId: string) {
+  db.auditLog.unshift({
+    id: nextId("aud"),
+    actorId: actor.id,
+    actorName: actor.fullName,
+    action,
+    subjectId,
+    at: new Date().toISOString(),
+  });
 }
 
 export function toPublicUser(user: MockUser): User {

@@ -45,12 +45,22 @@ let started = false;
 export function startMockServer(port: number) {
   if (started) return;
   started = true;
-  createServer((req, res) => {
+  const server = createServer((req, res) => {
     handle(req, res).catch(() => {
       res.writeHead(500, { "content-type": "application/json" });
       res.end(JSON.stringify({ statusCode: 500, message: "mock server error" }));
     });
-  }).listen(port, () => {
+  });
+  server.on("error", (e: NodeJS.ErrnoException) => {
+    // Another dev instance already owns the port — reuse it (identical mock),
+    // don't crash the server process.
+    if (e.code === "EADDRINUSE") {
+      console.log(`[mock] backend port ${port} already in use — reusing existing instance`);
+    } else {
+      console.error("[mock] backend error", e);
+    }
+  });
+  server.listen(port, () => {
     console.log(`[mock] backend listening on http://localhost:${port}`);
   });
 }
