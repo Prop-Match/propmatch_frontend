@@ -18,10 +18,7 @@ export interface MockUser extends User {
   password?: string;
   kyc: {
     completedSteps: KycStep[];
-    attemptsUsed: number;
-    extractedName: string | null;
-    nationalIdLast4: string | null;
-    matchConfidence: number | null;
+    verifiedAt: string | null;
   };
   quotas: {
     matchUsed: number;
@@ -119,13 +116,16 @@ function makeUser(
     phone: "01012345678",
     role,
     verificationStatus,
+    verificationRejectedAt: null,
+    verificationResubmitAfter: null,
+    verificationRejectionReason: null,
     createdAt: "2026-06-01T10:00:00.000Z",
     kyc: {
-      completedSteps: verificationStatus === "verified" ? ["id-front", "id-back", "selfie"] : [],
-      attemptsUsed: 0,
-      extractedName: verificationStatus === "verified" ? fullName : null,
-      nationalIdLast4: verificationStatus === "verified" ? "4821" : null,
-      matchConfidence: verificationStatus === "verified" ? 94 : null,
+      completedSteps:
+        verificationStatus === "verified" || verificationStatus === "pending_review"
+          ? ["license", "government_id", "proof_of_address"]
+          : [],
+      verifiedAt: verificationStatus === "verified" ? "2026-06-02T10:00:00.000Z" : null,
     },
     quotas: { matchUsed: 0, matchLimit: 3, optimizerUsed: 0, optimizerLimit: 2, freeListingUsed: false },
     ...(adminRole
@@ -200,11 +200,11 @@ export interface MockDb {
 
 function seed(): MockDb {
   const users: MockUser[] = [
-    makeUser("usr_tenant", "أحمد محمود", "tenant@example.com", "tenant", "unverified"),
-    makeUser("usr_landlord", "محمد السيد", "landlord@example.com", "landlord", "verified"),
-    makeUser("usr_both", "سارة إبراهيم", "both@example.com", "both", "unverified"),
+    makeUser("usr_tenant", "أحمد محمود", "tenant@example.com", "user", "unverified"),
+    makeUser("usr_landlord", "محمد السيد", "landlord@example.com", "user", "verified"),
+    makeUser("usr_both", "سارة إبراهيم", "both@example.com", "user", "unverified"),
     makeUser("usr_admin", "مشرف المنصة", "admin@example.com", "admin", "verified", "super-admin"),
-    makeUser("usr_landlord2", "خالد عبد العزيز", "landlord2@example.com", "landlord", "pending"),
+    makeUser("usr_landlord2", "خالد عبد العزيز", "landlord2@example.com", "user", "pending_review"),
     // Additional admin team members (managed via /admin/team).
     makeUser("usr_admin2", "منى فؤاد", "support@example.com", "admin", "verified", "customer-support"),
     makeUser("usr_admin3", "طارق حسن", "listings@example.com", "admin", "verified", "listings-manager"),
@@ -365,6 +365,9 @@ export function toPublicUser(user: MockUser): User {
     phone: user.phone,
     role: user.role,
     verificationStatus: user.verificationStatus,
+    verificationRejectedAt: user.verificationRejectedAt ?? null,
+    verificationResubmitAfter: user.verificationResubmitAfter ?? null,
+    verificationRejectionReason: user.verificationRejectionReason ?? null,
     createdAt: user.createdAt,
   };
 }

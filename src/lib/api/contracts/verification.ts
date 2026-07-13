@@ -2,15 +2,24 @@ import { z } from "zod";
 import { VerificationStatusSchema } from "./auth";
 
 /**
- * eKYC wizard DTOs (SRS FR1). Raw images never persist past processing
- * (FR1.5); the client only ever sees extracted name + masked ID.
+ * Manual verification DTOs. Users keep one base role; this workflow unlocks
+ * listing creation after an admin approves submitted legal/business documents.
  */
 
-export const KycStepSchema = z.enum(["id-front", "id-back", "selfie"]);
-export type KycStep = z.infer<typeof KycStepSchema>;
+export const VerificationDocumentTypeSchema = z.enum(["license", "government_id", "proof_of_address"]);
+export type VerificationDocumentType = z.infer<typeof VerificationDocumentTypeSchema>;
+
+export const verificationDocumentLabels: Record<VerificationDocumentType, string> = {
+  license: "الرخصة أو السجل التجاري",
+  government_id: "بطاقة الهوية",
+  proof_of_address: "إثبات العنوان",
+};
+
+export const KycStepSchema = VerificationDocumentTypeSchema;
+export type KycStep = VerificationDocumentType;
 
 export const KycUploadResponseSchema = z.object({
-  step: KycStepSchema,
+  step: VerificationDocumentTypeSchema,
   accepted: z.boolean(),
   /** Set when accepted=false: bad quality etc. */
   reason: z.string().nullable(),
@@ -19,13 +28,12 @@ export type KycUploadResponse = z.infer<typeof KycUploadResponseSchema>;
 
 export const KycStateSchema = z.object({
   status: VerificationStatusSchema,
-  completedSteps: z.array(KycStepSchema),
-  attemptsUsed: z.number().int().min(0),
-  maxAttempts: z.number().int(),
-  /** Present once verified. */
-  extractedName: z.string().nullable(),
-  nationalIdLast4: z.string().nullable(),
-  /** Selfie/ID match confidence 0-100, present once processed. */
-  matchConfidence: z.number().nullable(),
+  completedSteps: z.array(VerificationDocumentTypeSchema),
+  hasListingIntent: z.boolean(),
+  canSubmit: z.boolean(),
+  rejectionReason: z.string().nullable(),
+  rejectedAt: z.string().datetime().nullable(),
+  resubmitAfter: z.string().datetime().nullable(),
+  verifiedAt: z.string().datetime().nullable(),
 });
 export type KycState = z.infer<typeof KycStateSchema>;

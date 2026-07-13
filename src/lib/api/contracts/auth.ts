@@ -5,12 +5,17 @@ import { z } from "zod";
  * see ASSUMPTIONS.md, "Auth & account model".
  */
 
-/** "admin" is never offered at signup — admin accounts are created internally. */
-export const AccountRoleSchema = z.enum(["tenant", "landlord", "both", "admin"]);
+/**
+ * Normal marketplace accounts share the same base role. The legacy
+ * tenant/landlord/both values are accepted while the backend contract is
+ * reconciled, but new signups use "user"; listing capability comes from
+ * verificationStatus, not role.
+ */
+export const AccountRoleSchema = z.enum(["user", "tenant", "landlord", "both", "admin"]);
 export type AccountRole = z.infer<typeof AccountRoleSchema>;
 
-/** The three roles a user may pick at signup (مستأجر / مالك / الاثنين). */
-export const SignupRoleSchema = z.enum(["tenant", "landlord", "both"]);
+/** New public signups always create the uniform base user role. */
+export const SignupRoleSchema = z.literal("user");
 export type SignupRole = z.infer<typeof SignupRoleSchema>;
 
 export const RegisterRequestSchema = z.object({
@@ -28,7 +33,7 @@ export const LoginRequestSchema = z.object({
 });
 export type LoginRequest = z.infer<typeof LoginRequestSchema>;
 
-export const VerificationStatusSchema = z.enum(["unverified", "pending", "verified", "locked"]);
+export const VerificationStatusSchema = z.enum(["unverified", "pending_review", "verified", "rejected"]);
 export type VerificationStatus = z.infer<typeof VerificationStatusSchema>;
 
 export const UserSchema = z.object({
@@ -38,6 +43,9 @@ export const UserSchema = z.object({
   phone: z.string(),
   role: AccountRoleSchema,
   verificationStatus: VerificationStatusSchema,
+  verificationRejectedAt: z.string().datetime().nullable().optional(),
+  verificationResubmitAfter: z.string().datetime().nullable().optional(),
+  verificationRejectionReason: z.string().nullable().optional(),
   createdAt: z.string().datetime(),
 });
 export type User = z.infer<typeof UserSchema>;

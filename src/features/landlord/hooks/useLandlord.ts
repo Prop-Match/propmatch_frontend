@@ -7,6 +7,7 @@ import type { CreatePropertyRequest, OptimizeDescriptionResponse, PropertyDetail
 export interface CreatePropertyResult {
   property: PropertyDetail;
   requiresPayment: boolean;
+  requiresVerification?: boolean;
 }
 
 export function useCreateProperty() {

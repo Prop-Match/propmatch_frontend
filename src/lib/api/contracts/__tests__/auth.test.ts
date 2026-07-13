@@ -11,13 +11,13 @@ describe("auth contracts", () => {
     expect(result.success).toBe(false);
   });
 
-  it("requires one of the three account roles on registration", () => {
+  it("requires the uniform user role on registration", () => {
     const result = RegisterRequestSchema.safeParse({
       fullName: "سارة أحمد",
       email: "sara@example.com",
       phone: "01012345678",
       password: "12345678",
-      role: "landlord",
+      role: "user",
     });
     expect(result.success).toBe(true);
   });

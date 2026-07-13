@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { User as UserIcon, Mail, Phone, LogOut, Search, Home, ShieldAlert, LifeBuoy, ChevronLeft } from "lucide-react";
 import Link from "next/link";
@@ -8,6 +9,7 @@ import { VerifiedBadge } from "@/src/components/ui/VerifiedBadge";
 import { Button } from "@/src/components/ui/Button";
 import { Skeleton } from "@/src/components/ui/Skeleton";
 import { useSessionUiStore } from "@/src/lib/store/useSessionUiStore";
+import { isDualCapable } from "@/src/features/auth/roleRouting";
 import { cn } from "@/src/utils/cn";
 
 export function ProfileScreen() {
@@ -16,13 +18,14 @@ export function ProfileScreen() {
   const logout = useLogout();
   const { activeRoleContext, setActiveRoleContext } = useSessionUiStore();
 
-  if (isLoading) return <Skeleton className="h-96 w-full" />;
-  if (!user) {
-    router.push("/login");
-    return null;
-  }
+  useEffect(() => {
+    if (!isLoading && !user) router.push("/login");
+  }, [isLoading, router, user]);
 
-  const isDual = user.role === "both";
+  if (isLoading) return <Skeleton className="h-96 w-full" />;
+  if (!user) return null;
+
+  const isDual = isDualCapable(user.role);
 
   return (
     <div className="mx-auto flex max-w-xl flex-col gap-5">
@@ -50,11 +53,11 @@ export function ProfileScreen() {
         </div>
       </div>
 
-      {/* Verification CTA for landlords/dual */}
-      {user.verificationStatus !== "verified" && user.role !== "tenant" && (
+      {/* Verification CTA — any dual-capable account that isn't verified yet */}
+      {user.verificationStatus !== "verified" && isDual && (
         <Link href="/landlord/verify" className="flex items-center gap-3 rounded-card border border-pending/30 bg-pending-tint px-4 py-3">
           <ShieldAlert className="size-5 text-pending" aria-hidden />
-          <span className="flex-1 text-small font-semibold text-pending">وثّق هويتك لنشر إعلاناتك</span>
+          <span className="flex-1 text-small font-semibold text-pending">وثّق حسابك لنشر إعلاناتك</span>
           <span className="text-small text-pending">←</span>
         </Link>
       )}
