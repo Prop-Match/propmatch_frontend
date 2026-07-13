@@ -113,14 +113,16 @@ export function KycWizard() {
         })}
       </div>
 
-      {/* Dev affordance: simulate a bad-quality capture to exercise lock-after-3. */}
-      <button
-        type="button"
-        onClick={() => capture("id-front", true)}
-        className="text-caption text-muted underline hover:text-body-text"
-      >
-        محاكاة صورة منخفضة الجودة (للتجربة)
-      </button>
+      {/* Dev-only: simulate a bad-quality capture to exercise lock-after-3. */}
+      {process.env.NODE_ENV !== "production" && (
+        <button
+          type="button"
+          onClick={() => capture("id-front", true)}
+          className="text-caption text-muted underline hover:text-body-text"
+        >
+          محاكاة صورة منخفضة الجودة (للتجربة)
+        </button>
+      )}
 
       <Button
         size="lg"

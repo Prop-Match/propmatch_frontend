@@ -108,6 +108,11 @@ export function dispatch(
   if (method === "GET" && path === "/auth/me") {
     return user ? ok(toPublicUser(user)) : unauth();
   }
+  if (method === "POST" && path === "/auth/forgot-password") {
+    // Always returns ok regardless of whether the email exists, so the
+    // response can't be used to enumerate accounts (see ASSUMPTIONS.md).
+    return ok({ sent: true });
+  }
 
   // ---- properties (public browse) ----
   if (method === "GET" && path === "/properties") {
@@ -268,6 +273,28 @@ export function dispatch(
     return ok({ results, remainingFreeMatches: Math.max(0, user.quotas.matchLimit - user.quotas.matchUsed) });
   }
 
+  // ---- notifications ----
+  if (path === "/notifications" && method === "GET") {
+    if (!user) return unauth();
+    const now = Date.now();
+    // Role-appropriate sample notifications.
+    const base =
+      user.role === "admin"
+        ? [
+            { id: "n1", kind: "review", title: "طلب توثيق جديد بحاجة لمراجعة", at: new Date(now - 3 * 60_000).toISOString() },
+            { id: "n2", kind: "review", title: "عقار جديد قيد المراجعة", at: new Date(now - 22 * 60_000).toISOString() },
+          ]
+        : user.role === "landlord"
+          ? [
+              { id: "n1", kind: "inquiry", title: "مستأجر مهتم بعقارك في حي الجامعة", at: new Date(now - 6 * 60_000).toISOString() },
+              { id: "n2", kind: "listing", title: "تمت الموافقة على إعلانك", at: new Date(now - 60 * 60_000).toISOString() },
+            ]
+          : [
+              { id: "n1", kind: "match", title: "لديك نتائج مطابقة جديدة", at: new Date(now - 10 * 60_000).toISOString() },
+            ];
+    return ok({ items: base, unread: base.length });
+  }
+
   // ---- eKYC ----
   if (path === "/kyc/state" && method === "GET") {
     if (!user) return unauth();
@@ -360,6 +387,37 @@ export function dispatch(
       fullName: admin.fullName,
       roleName: "Super Admin",
       capabilities: ["listing:approve", "listing:reject", "kyc:review", "payment:refund", "report:export", "review:delete", "ticket:reply", "pii:reveal", "admin:create", "admin:manage"],
+    });
+  }
+  if (path === "/admin/stats" && method === "GET") {
+    if (!admin) return err(403, "غير مسموح");
+    // Blend seeded demo figures with any real payments made this session.
+    const successful = db.payments.filter((p) => p.status === "success");
+    const liveRevenue = successful.reduce((s, p) => s + p.amountEgp, 0);
+    const monthly = [
+      { month: "يناير", revenue: 3200, transactions: 24 },
+      { month: "فبراير", revenue: 4100, transactions: 31 },
+      { month: "مارس", revenue: 3800, transactions: 28 },
+      { month: "أبريل", revenue: 5200, transactions: 39 },
+      { month: "مايو", revenue: 6100, transactions: 44 },
+      { month: "يونيو", revenue: 5400 + liveRevenue, transactions: 41 + successful.length },
+    ];
+    const approved = db.properties.filter((p) => p.status === "approved").length;
+    const pending = db.properties.filter((p) => p.status === "pending").length;
+    const rejected = db.properties.filter((p) => p.status === "rejected").length;
+    return ok({
+      summary: {
+        totalRevenue: monthly.reduce((s, m) => s + m.revenue, 0),
+        totalTransactions: monthly.reduce((s, m) => s + m.transactions, 0),
+        activeListings: approved,
+        pendingReviews: pending,
+      },
+      monthlyRevenue: monthly,
+      reviewDistribution: [
+        { label: "تمت الموافقة", value: approved },
+        { label: "قيد المراجعة", value: pending },
+        { label: "مرفوض", value: rejected },
+      ],
     });
   }
   if (path === "/admin/queues" && method === "GET") {

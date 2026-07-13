@@ -40,6 +40,18 @@ export const ReviewDecisionSchema = z.object({
 });
 export type ReviewDecision = z.infer<typeof ReviewDecisionSchema>;
 
+export const AdminStatsSchema = z.object({
+  summary: z.object({
+    totalRevenue: z.number(),
+    totalTransactions: z.number(),
+    activeListings: z.number(),
+    pendingReviews: z.number(),
+  }),
+  monthlyRevenue: z.array(z.object({ month: z.string(), revenue: z.number(), transactions: z.number() })),
+  reviewDistribution: z.array(z.object({ label: z.string(), value: z.number() })),
+});
+export type AdminStats = z.infer<typeof AdminStatsSchema>;
+
 export const KycReviewDetailSchema = z.object({
   userId: z.string(),
   extractedName: z.string(),

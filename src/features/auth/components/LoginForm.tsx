@@ -51,6 +51,9 @@ export function LoginForm() {
         error={errors.password?.message}
         {...register("password")}
       />
+      <Link href="/forgot-password" className="-mt-1 self-start text-caption font-semibold text-primary hover:underline">
+        نسيت كلمة المرور؟
+      </Link>
       {errors.root && (
         <p className="rounded-control bg-error-tint px-3 py-2 text-small text-error" role="alert">
           {errors.root.message}

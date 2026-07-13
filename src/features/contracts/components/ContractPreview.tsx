@@ -8,7 +8,13 @@ import type { ContractForm } from "@/src/lib/api/contracts/contract";
 /**
  * Standard Egyptian lease rendered on screen. "تحميل العقد PDF" triggers the
  * browser print dialog scoped to the document (see the print stylesheet in
- * globals.css); user picks "Save as PDF".
+ * globals.css); the user picks "Save as PDF".
+ *
+ * Production path (SRS FR5.3): the backend renders this same template to PDF
+ * server-side via Puppeteer/pdfkit and streams a real file — offloaded to an
+ * async queue (NFR2.2). This client print flow is the interim mechanism until
+ * that endpoint exists; swap the button handler for a download of the
+ * server-generated PDF then (see ASSUMPTIONS.md).
  */
 export function ContractPreview({ data, onBack }: { data: ContractForm; onBack: () => void }) {
   return (
@@ -23,6 +29,9 @@ export function ContractPreview({ data, onBack }: { data: ContractForm; onBack: 
           تحميل العقد PDF
         </Button>
       </div>
+      <p className="text-caption text-muted print:hidden">
+        اختر «حفظ بصيغة PDF» من نافذة الطباعة لتنزيل نسخة من العقد.
+      </p>
 
       <article id="contract-document" className="flex flex-col gap-6 rounded-card border border-hairline bg-surface p-8 leading-loose shadow-card">
         <header className="border-b border-hairline pb-4 text-center">
