@@ -1,5 +1,4 @@
 import { z } from "zod";
-import { SignupRoleSchema } from "@/src/lib/api/contracts/auth";
 
 export const loginFormSchema = z.object({
   email: z.string().email("بريد إلكتروني غير صالح"),
@@ -12,6 +11,6 @@ export const signupFormSchema = z.object({
   email: z.string().email("بريد إلكتروني غير صالح"),
   phone: z.string().regex(/^01\d{9}$/, "رقم هاتف مصري غير صالح"),
   password: z.string().min(8, "كلمة المرور 8 أحرف على الأقل"),
-  role: SignupRoleSchema,
+  role: z.literal("user").default("user"),
 });
 export type SignupForm = z.infer<typeof signupFormSchema>;

@@ -4,6 +4,8 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Bell } from "lucide-react";
 import { cn } from "@/src/utils/cn";
+import { useSessionUiStore } from "@/src/lib/store/useSessionUiStore";
+import { useHideOnScroll } from "@/src/hooks/useHideOnScroll";
 
 export interface NavItem {
   href: string;
@@ -26,6 +28,8 @@ export function RoleNav({
 }) {
   const pathname = usePathname();
   const isActive = (href: string) => pathname === href || pathname.startsWith(`${href}/`);
+  const bottomNavVisible = useSessionUiStore((s) => s.bottomNavVisible);
+  useHideOnScroll();
 
   return (
     <>
@@ -54,8 +58,13 @@ export function RoleNav({
         </div>
       </header>
 
-      {/* Mobile bottom tab bar */}
-      <nav className="fixed inset-x-0 bottom-0 z-30 flex items-stretch border-t border-hairline bg-surface md:hidden">
+      {/* Mobile bottom tab bar — hides on scroll-down, reveals on scroll-up (§4.5) */}
+      <nav
+        className={cn(
+          "fixed inset-x-0 bottom-0 z-30 flex items-stretch border-t border-hairline bg-surface transition-transform duration-300 md:hidden",
+          bottomNavVisible ? "translate-y-0" : "translate-y-full",
+        )}
+      >
         {items.map(({ href, label, Icon }) => (
           <Link
             key={href}
@@ -74,19 +83,4 @@ export function RoleNav({
   );
 }
 
-export function NotificationBell({ count }: { count?: number }) {
-  return (
-    <button
-      type="button"
-      className="relative flex size-9 items-center justify-center rounded-full text-body-text hover:bg-background"
-      aria-label="الإشعارات"
-    >
-      <Bell className="size-5" aria-hidden />
-      {count ? (
-        <span className="absolute -top-0.5 -end-0.5 flex min-w-4 items-center justify-center rounded-full bg-error px-1 text-[10px] font-bold text-white">
-          {count}
-        </span>
-      ) : null}
-    </button>
-  );
-}
+export { NotificationBell } from "./NotificationBell";

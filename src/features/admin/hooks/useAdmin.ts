@@ -2,7 +2,14 @@
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, isApiClientError } from "@/src/lib/api/browserClient";
-import type { AdminQueuesResponse, KycReviewDetail, ReviewDecision } from "@/src/lib/api/contracts/admin";
+import type { AdminQueuesResponse, AdminStats, KycReviewDetail, ReviewDecision } from "@/src/lib/api/contracts/admin";
+
+export function useAdminStats() {
+  return useQuery({
+    queryKey: ["admin", "stats"],
+    queryFn: () => api.get<AdminStats>("admin/stats"),
+  });
+}
 
 /**
  * Live queue via polling (design spec: WebSocket, degrade to polling — we ship

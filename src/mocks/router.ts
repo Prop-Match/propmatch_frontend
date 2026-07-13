@@ -5,7 +5,29 @@ import type { CreateCheckoutRequest } from "@/src/lib/api/contracts/payment";
 import type { ReviewDecision } from "@/src/lib/api/contracts/admin";
 import type { ChatRequest } from "@/src/lib/api/contracts/support";
 import type { PropertyDetail, PropertySummary } from "@/src/lib/api/contracts/property";
-import { db, findUserByToken, nextId, tokensFor, toPublicUser, type MockUser } from "./db";
+import type {
+  AdminReplyRequest,
+  SupportSendRequest,
+  TicketStatusUpdate,
+} from "@/src/lib/api/contracts/support";
+import {
+  ROLE_CAPABILITIES,
+  adminRoleLabels,
+  type CreateAdminRequest,
+  type UpdateAdminRequest,
+} from "@/src/lib/api/contracts/admin";
+import type { Capability } from "@/src/lib/api/contracts/common";
+import { verificationDocumentLabels, type VerificationDocumentType } from "@/src/lib/api/contracts/verification";
+import {
+  db,
+  findUserByToken,
+  nextId,
+  pushAudit,
+  tokensFor,
+  toPublicUser,
+  type MockTicket,
+  type MockUser,
+} from "./db";
 
 /**
  * Framework-agnostic mock backend. Given a method/path/body/auth, returns a
@@ -22,7 +44,83 @@ export interface MockResponse {
 
 const ok = (body: unknown = { ok: true }): MockResponse => ({ status: 200, body });
 const err = (status: number, message: string): MockResponse => ({ status, body: { statusCode: status, message } });
+const codedErr = (status: number, code: string, message: string, extra: Record<string, unknown> = {}): MockResponse => ({
+  status,
+  body: { statusCode: status, code, message, ...extra },
+});
 const unauth = (): MockResponse => err(401, "Not authenticated");
+const VERIFICATION_COOLDOWN_MS = 24 * 60 * 60 * 1000;
+
+/* ------------------------------ support helpers ------------------------------ */
+
+const SUPPORT_KB: { keys: string[]; answer: string }[] = [
+  { keys: ["توثيق", "هوية", "بطاقة", "تحقق"], answer: "لتوثيق هويتك، افتح «توثيق الهوية» وارفع صورتي البطاقة وصورة شخصية. تتم المراجعة خلال وقت قصير." },
+  { keys: ["دفع", "فلوس", "رسوم", "بايموب", "paymob", "فيزا"], answer: "المدفوعات تتم مباشرة بالجنيه المصري عبر Paymob. أول إعلان مجاني، وبعده تُدفع رسوم بسيطة لكل إعلان." },
+  { keys: ["إعلان", "عقار", "نشر", "صور"], answer: "لإضافة عقار، ادخل «إضافة عقار» واملأ الخطوات. تأكد أن كل صورة أقل من 5 ميجابايت. يظهر الإعلان للمستأجرين بعد موافقة الإدارة." },
+  { keys: ["مطابقة", "بحث", "سكن"], answer: "استخدم «المطابقة الذكية» ووصّف سكنك المثالي بكلماتك، وسنعرض لك أقرب العقارات المطابقة مع نسبة التطابق." },
+  { keys: ["تواصل", "رقم", "هاتف", "مالك"], answer: "رقم المالك يظهر بعد تأكيد التطابق من الطرفين حمايةً للخصوصية." },
+];
+
+function aiSupportReply(message: string): string {
+  const hit = SUPPORT_KB.find((k) => k.keys.some((key) => message.includes(key)));
+  if (hit) return `${hit.answer}\n\nإذا احتجت مساعدة إضافية، يمكنك طلب التحدث مع موظف بشري.`;
+  return "شكرًا لتواصلك. لم أفهم استفسارك تمامًا — هل يمكنك التوضيح أكثر؟ أو يمكنك طلب التحدث مع موظف بشري.";
+}
+
+function pushMsg(ticket: MockTicket, author: MockTicket["messages"][number]["author"], authorName: string, content: string, internal = false) {
+  const at = new Date().toISOString();
+  ticket.messages.push({ id: nextId("sm"), author, authorName, content, internal, at });
+  ticket.lastMessageAt = at;
+}
+
+/** A ticket the user can still talk into (not closed). */
+function openTicketFor(userId: string): MockTicket | undefined {
+  return [...db.tickets].reverse().find((t) => t.userId === userId && t.status !== "closed");
+}
+function latestTicketFor(userId: string): MockTicket | undefined {
+  return [...db.tickets].reverse().find((t) => t.userId === userId);
+}
+
+function threadView(ticket: MockTicket | undefined) {
+  if (!ticket) return { ticketId: null, status: null, escalated: false, messages: [] };
+  return {
+    ticketId: ticket.id,
+    status: ticket.status,
+    escalated: ticket.escalated,
+    // Never expose internal admin notes to the customer.
+    messages: ticket.messages.filter((m) => !m.internal),
+  };
+}
+
+function ticketSummary(t: MockTicket) {
+  const u = db.users.find((x) => x.id === t.userId);
+  const assignee = t.assignedAdminId ? db.users.find((x) => x.id === t.assignedAdminId) : null;
+  return {
+    id: t.id,
+    subject: t.subject,
+    userName: u?.fullName ?? "عميل",
+    status: t.status,
+    assignedAdminName: assignee?.fullName ?? null,
+    lastMessageAt: t.lastMessageAt,
+    createdAt: t.createdAt,
+  };
+}
+function ticketDetail(t: MockTicket) {
+  return { ...ticketSummary(t), userId: t.userId, assignedAdminId: t.assignedAdminId, messages: t.messages };
+}
+
+function teamMember(u: MockUser) {
+  return {
+    id: u.id,
+    fullName: u.fullName,
+    email: u.email,
+    role: u.adminRole ?? "read-only",
+    capabilities: u.capabilities ?? [],
+    disabled: u.disabled ?? false,
+    lastLoginAt: u.lastLoginAt ?? null,
+    createdAt: u.createdAt,
+  };
+}
 
 function toSummary(p: PropertyDetail): PropertySummary {
   return {
@@ -91,10 +189,13 @@ export function dispatch(
       fullName: b.fullName,
       email: b.email,
       phone: b.phone,
-      role: b.role,
+      role: "user",
       verificationStatus: "unverified",
+      verificationRejectedAt: null,
+      verificationResubmitAfter: null,
+      verificationRejectionReason: null,
       createdAt: new Date().toISOString(),
-      kyc: { completedSteps: [], attemptsUsed: 0, extractedName: null, nationalIdLast4: null, matchConfidence: null },
+      kyc: { completedSteps: [], verifiedAt: null },
       quotas: { matchUsed: 0, matchLimit: 3, optimizerUsed: 0, optimizerLimit: 2, freeListingUsed: false },
     };
     db.users.push(u);
@@ -107,6 +208,11 @@ export function dispatch(
   }
   if (method === "GET" && path === "/auth/me") {
     return user ? ok(toPublicUser(user)) : unauth();
+  }
+  if (method === "POST" && path === "/auth/forgot-password") {
+    // Always returns ok regardless of whether the email exists, so the
+    // response can't be used to enumerate accounts (see ASSUMPTIONS.md).
+    return ok({ sent: true });
   }
 
   // ---- properties (public browse) ----
@@ -163,9 +269,9 @@ export function dispatch(
   }
   if (path === "/landlord/properties" && method === "POST") {
     if (!user) return unauth();
-    if (user.verificationStatus !== "verified") return err(403, "يجب توثيق هويتك أولًا قبل إضافة عقار");
     const b = body as CreatePropertyRequest;
-    const needsPayment = user.quotas.freeListingUsed;
+    const isVerified = user.verificationStatus === "verified";
+    const needsPayment = isVerified && user.quotas.freeListingUsed;
     const property: PropertyDetail = {
       id: nextId("prop"),
       ownerId: user.id,
@@ -177,8 +283,8 @@ export function dispatch(
       area: b.area,
       furnished: b.furnished,
       boosted: false,
-      ownerVerified: true,
-      status: needsPayment ? "draft" : "pending",
+      ownerVerified: isVerified,
+      status: isVerified && !needsPayment ? "pending" : "draft",
       coverImage: b.photos[0] ?? null,
       location: b.location,
       type: b.type,
@@ -197,8 +303,12 @@ export function dispatch(
       rejectionReason: null,
     };
     db.properties.push(property);
+    if (!isVerified) {
+      pushAudit(user, "listing:draft_created_verification_required", property.id);
+      return ok({ property, requiresPayment: false, requiresVerification: true });
+    }
     if (!needsPayment) user.quotas.freeListingUsed = true;
-    return ok({ property, requiresPayment: needsPayment });
+    return ok({ property, requiresPayment: needsPayment, requiresVerification: false });
   }
   if (seg[0] === "landlord" && seg[1] === "properties" && seg[3] === "optimize-description" && method === "POST") {
     if (!user) return unauth();
@@ -246,7 +356,7 @@ export function dispatch(
     const property = db.properties.find((p) => p.id === inquiry.propertyId);
     if (property?.ownerId !== user.id) return err(403, "غير مسموح");
     inquiry.status = "accepted";
-    db.auditLog.push({ actorId: user.id, action: "inquiry:accept", subjectId: inquiry.id, at: new Date().toISOString() });
+    pushAudit(user, "inquiry:accept", inquiry.id);
     return ok();
   }
 
@@ -268,39 +378,84 @@ export function dispatch(
     return ok({ results, remainingFreeMatches: Math.max(0, user.quotas.matchLimit - user.quotas.matchUsed) });
   }
 
-  // ---- eKYC ----
+  // ---- notifications ----
+  if (path === "/notifications" && method === "GET") {
+    if (!user) return unauth();
+    const now = Date.now();
+    // Role-appropriate sample notifications.
+    const hasListings = db.properties.some((p) => p.ownerId === user.id);
+    const base =
+      user.role === "admin"
+        ? [
+            { id: "n1", kind: "review", title: "طلب توثيق جديد بحاجة لمراجعة", at: new Date(now - 3 * 60_000).toISOString() },
+            { id: "n2", kind: "review", title: "عقار جديد قيد المراجعة", at: new Date(now - 22 * 60_000).toISOString() },
+          ]
+        : hasListings
+          ? [
+              { id: "n1", kind: "inquiry", title: "مستأجر مهتم بعقارك في حي الجامعة", at: new Date(now - 6 * 60_000).toISOString() },
+              { id: "n2", kind: "listing", title: "تمت الموافقة على إعلانك", at: new Date(now - 60 * 60_000).toISOString() },
+            ]
+          : [
+              { id: "n1", kind: "match", title: "لديك نتائج مطابقة جديدة", at: new Date(now - 10 * 60_000).toISOString() },
+            ];
+    return ok({ items: base, unread: base.length });
+  }
+
+  // ---- verification ----
   if (path === "/kyc/state" && method === "GET") {
     if (!user) return unauth();
+    const hasListingIntent = db.properties.some((p) => p.ownerId === user.id);
+    const cooldownActive = Boolean(
+      user.verificationResubmitAfter && new Date(user.verificationResubmitAfter).getTime() > Date.now(),
+    );
     return ok({
       status: user.verificationStatus,
       completedSteps: user.kyc.completedSteps,
-      attemptsUsed: user.kyc.attemptsUsed,
-      maxAttempts: 3,
-      extractedName: user.kyc.extractedName,
-      nationalIdLast4: user.kyc.nationalIdLast4,
-      matchConfidence: user.kyc.matchConfidence,
+      hasListingIntent,
+      canSubmit:
+        hasListingIntent &&
+        user.verificationStatus !== "verified" &&
+        user.verificationStatus !== "pending_review" &&
+        !cooldownActive,
+      rejectionReason: user.verificationRejectionReason ?? null,
+      rejectedAt: user.verificationRejectedAt ?? null,
+      resubmitAfter: user.verificationResubmitAfter ?? null,
+      verifiedAt: user.kyc.verifiedAt,
     });
   }
   if (path === "/kyc/upload" && method === "POST") {
     if (!user) return unauth();
-    if (user.verificationStatus === "locked") return err(403, "تم إيقاف التحقق، تواصل مع الدعم");
-    const b = body as { step: "id-front" | "id-back" | "selfie"; simulateBadQuality?: boolean };
+    if (user.verificationStatus === "verified") return codedErr(409, "ALREADY_VERIFIED", "تم توثيق هذا الحساب بالفعل");
+    if (user.verificationStatus === "pending_review") return codedErr(409, "VERIFICATION_ALREADY_PENDING", "طلب التوثيق قيد المراجعة بالفعل");
+    if (user.verificationResubmitAfter && new Date(user.verificationResubmitAfter).getTime() > Date.now()) {
+      return codedErr(429, "VERIFICATION_COOLDOWN_ACTIVE", "يجب الانتظار قبل إعادة إرسال التوثيق", {
+        resubmitAfter: user.verificationResubmitAfter,
+      });
+    }
+    const b = body as { step: VerificationDocumentType; simulateBadQuality?: boolean };
     if (b.simulateBadQuality) {
-      user.kyc.attemptsUsed++;
-      if (user.kyc.attemptsUsed >= 3) user.verificationStatus = "locked";
-      return ok({ step: b.step, accepted: false, reason: "جودة الصورة منخفضة، حاول في إضاءة أفضل" });
+      return ok({ step: b.step, accepted: false, reason: "المستند غير واضح، ارفع نسخة أوضح" });
     }
     if (!user.kyc.completedSteps.includes(b.step)) user.kyc.completedSteps.push(b.step);
     return ok({ step: b.step, accepted: true, reason: null });
   }
   if (path === "/kyc/submit" && method === "POST") {
     if (!user) return unauth();
-    if (user.kyc.completedSteps.length < 3) return err(400, "أكمل جميع الخطوات أولًا");
-    user.verificationStatus = "pending";
-    user.kyc.extractedName = user.fullName;
-    user.kyc.nationalIdLast4 = "4821";
-    user.kyc.matchConfidence = 91;
+    const hasListingIntent = db.properties.some((p) => p.ownerId === user.id);
+    if (!hasListingIntent) return codedErr(403, "LISTING_INTENT_REQUIRED", "ابدأ بإضافة مسودة إعلان قبل التوثيق");
+    if (user.verificationStatus === "verified") return codedErr(409, "ALREADY_VERIFIED", "تم توثيق هذا الحساب بالفعل");
+    if (user.verificationStatus === "pending_review") return codedErr(409, "VERIFICATION_ALREADY_PENDING", "طلب التوثيق قيد المراجعة بالفعل");
+    if (user.verificationResubmitAfter && new Date(user.verificationResubmitAfter).getTime() > Date.now()) {
+      return codedErr(429, "VERIFICATION_COOLDOWN_ACTIVE", "يجب الانتظار قبل إعادة إرسال التوثيق", {
+        resubmitAfter: user.verificationResubmitAfter,
+      });
+    }
+    if (user.kyc.completedSteps.length < 3) return err(400, "أكمل جميع المستندات أولًا");
+    user.verificationStatus = "pending_review";
+    user.verificationRejectedAt = null;
+    user.verificationResubmitAfter = null;
     db.kycSubmissions.push({ userId: user.id, submittedAt: new Date().toISOString(), reviewed: false });
+    pushAudit(user, "verification:submitted", user.id);
     return ok();
   }
 
@@ -352,14 +507,50 @@ export function dispatch(
   }
 
   // ---- admin ----
-  const admin = user?.role === "admin" ? user : null;
+  // A disabled admin loses access entirely.
+  const admin = user?.role === "admin" && !user.disabled ? user : null;
+  const adminCaps: Capability[] = admin?.capabilities ?? [];
+  const can = (cap: Capability) => adminCaps.includes(cap);
+
   if (path === "/admin/session" && method === "GET") {
     if (!admin) return err(403, "غير مسموح");
     return ok({
       id: admin.id,
       fullName: admin.fullName,
-      roleName: "Super Admin",
-      capabilities: ["listing:approve", "listing:reject", "kyc:review", "payment:refund", "report:export", "review:delete", "ticket:reply", "pii:reveal", "admin:create", "admin:manage"],
+      roleName: admin.adminRole ? adminRoleLabels[admin.adminRole] : "مشرف",
+      capabilities: adminCaps,
+    });
+  }
+  if (path === "/admin/stats" && method === "GET") {
+    if (!admin) return err(403, "غير مسموح");
+    if (!can("report:export")) return err(403, "لا تملك صلاحية عرض التقارير");
+    // Blend seeded demo figures with any real payments made this session.
+    const successful = db.payments.filter((p) => p.status === "success");
+    const liveRevenue = successful.reduce((s, p) => s + p.amountEgp, 0);
+    const monthly = [
+      { month: "يناير", revenue: 3200, transactions: 24 },
+      { month: "فبراير", revenue: 4100, transactions: 31 },
+      { month: "مارس", revenue: 3800, transactions: 28 },
+      { month: "أبريل", revenue: 5200, transactions: 39 },
+      { month: "مايو", revenue: 6100, transactions: 44 },
+      { month: "يونيو", revenue: 5400 + liveRevenue, transactions: 41 + successful.length },
+    ];
+    const approved = db.properties.filter((p) => p.status === "approved").length;
+    const pending = db.properties.filter((p) => p.status === "pending").length;
+    const rejected = db.properties.filter((p) => p.status === "rejected").length;
+    return ok({
+      summary: {
+        totalRevenue: monthly.reduce((s, m) => s + m.revenue, 0),
+        totalTransactions: monthly.reduce((s, m) => s + m.transactions, 0),
+        activeListings: approved,
+        pendingReviews: pending,
+      },
+      monthlyRevenue: monthly,
+      reviewDistribution: [
+        { label: "تمت الموافقة", value: approved },
+        { label: "قيد المراجعة", value: pending },
+        { label: "مرفوض", value: rejected },
+      ],
     });
   }
   if (path === "/admin/queues" && method === "GET") {
@@ -399,37 +590,228 @@ export function dispatch(
   }
   if (seg[0] === "admin" && seg[1] === "properties" && seg[3] === "review" && method === "POST") {
     if (!admin) return err(403, "غير مسموح");
+    const b = body as ReviewDecision;
+    if (!can(b.decision === "approve" ? "listing:approve" : "listing:reject"))
+      return err(403, "لا تملك صلاحية مراجعة العقارات");
     const property = db.properties.find((p) => p.id === seg[2]);
     if (!property) return err(404, "غير موجود");
     if (property.status !== "pending") return err(409, "تمت مراجعة هذا الطلب بالفعل");
-    const b = body as ReviewDecision;
     property.status = b.decision === "approve" ? "approved" : "rejected";
     property.rejectionReason = b.decision === "reject" ? (b.reason ?? null) : null;
-    db.auditLog.push({ actorId: admin.id, action: `listing:${b.decision}`, subjectId: property.id, at: new Date().toISOString() });
+    pushAudit(admin, `listing:${b.decision}`, property.id);
     return ok({ ok: true, status: property.status });
   }
   if (seg[0] === "admin" && seg[1] === "kyc" && seg.length === 3 && method === "GET") {
     if (!admin) return err(403, "غير مسموح");
     const u = db.users.find((x) => x.id === seg[2]);
     if (!u) return err(404, "غير موجود");
+    const submission = db.kycSubmissions.find((s) => s.userId === u.id && !s.reviewed);
     return ok({
       userId: u.id,
-      extractedName: u.kyc.extractedName ?? u.fullName,
-      nationalIdLast4: u.kyc.nationalIdLast4 ?? "0000",
-      matchConfidence: u.kyc.matchConfidence ?? 0,
-      submittedAt: db.kycSubmissions.find((s) => s.userId === u.id)?.submittedAt ?? u.createdAt,
+      userName: u.fullName,
+      documents: u.kyc.completedSteps.map((type) => ({
+        type,
+        label: verificationDocumentLabels[type],
+        uploadedAt: submission?.submittedAt ?? u.createdAt,
+      })),
+      submittedAt: submission?.submittedAt ?? u.createdAt,
     });
   }
   if (seg[0] === "admin" && seg[1] === "kyc" && seg[3] === "review" && method === "POST") {
     if (!admin) return err(403, "غير مسموح");
+    if (!can("kyc:review")) return err(403, "لا تملك صلاحية مراجعة التوثيق");
     const u = db.users.find((x) => x.id === seg[2]);
     const submission = db.kycSubmissions.find((s) => s.userId === seg[2] && !s.reviewed);
     if (!u || !submission) return err(409, "تمت مراجعة هذا الطلب بالفعل");
     const b = body as ReviewDecision;
-    u.verificationStatus = b.decision === "approve" ? "verified" : "unverified";
+    const rejectionReason = b.reason?.trim();
+    if (b.decision === "reject" && !rejectionReason) return err(400, "سبب الرفض مطلوب");
+    if (b.decision === "approve") {
+      u.verificationStatus = "verified";
+      u.kyc.verifiedAt = new Date().toISOString();
+      u.verificationRejectedAt = null;
+      u.verificationResubmitAfter = null;
+      u.verificationRejectionReason = null;
+      db.properties
+        .filter((p) => p.ownerId === u.id && p.status === "draft")
+        .forEach((p) => {
+          p.ownerVerified = true;
+          if (!u.quotas.freeListingUsed) {
+            p.status = "pending";
+            u.quotas.freeListingUsed = true;
+          }
+        });
+    } else {
+      const rejectedAt = new Date();
+      u.verificationStatus = "rejected";
+      u.verificationRejectedAt = rejectedAt.toISOString();
+      u.verificationResubmitAfter = new Date(rejectedAt.getTime() + VERIFICATION_COOLDOWN_MS).toISOString();
+      u.verificationRejectionReason = rejectionReason;
+      u.kyc.completedSteps = [];
+    }
     submission.reviewed = true;
-    db.auditLog.push({ actorId: admin.id, action: `kyc:${b.decision}`, subjectId: u.id, at: new Date().toISOString() });
+    pushAudit(admin, `verification:${b.decision}`, u.id);
     return ok();
+  }
+
+  // ---- customer support: user side (AI-first, escalate to human) ----
+  if (path === "/support/thread" && method === "GET") {
+    if (!user) return unauth();
+    const ticket = latestTicketFor(user.id);
+    return ok(threadView(ticket));
+  }
+  if (path === "/support/message" && method === "POST") {
+    if (!user) return unauth();
+    const { message } = body as SupportSendRequest;
+    let ticket = openTicketFor(user.id);
+    if (!ticket) {
+      ticket = {
+        id: nextId("tkt"),
+        userId: user.id,
+        subject: message.slice(0, 40),
+        status: "new",
+        assignedAdminId: null,
+        escalated: false,
+        messages: [],
+        createdAt: new Date().toISOString(),
+        lastMessageAt: new Date().toISOString(),
+      };
+      db.tickets.push(ticket);
+    }
+    pushMsg(ticket, "user", user.fullName, message);
+    // If a human is already handling it, don't auto-reply with the AI.
+    if (!ticket.escalated) {
+      pushMsg(ticket, "ai", "المساعد الآلي", aiSupportReply(message));
+    }
+    return ok(threadView(ticket));
+  }
+  if (path === "/support/escalate" && method === "POST") {
+    if (!user) return unauth();
+    const ticket = openTicketFor(user.id);
+    if (!ticket) return err(404, "لا توجد محادثة مفتوحة");
+    ticket.escalated = true;
+    if (ticket.status === "closed") ticket.status = "new";
+    pushMsg(ticket, "ai", "المساعد الآلي", "تم تحويلك إلى أحد موظفي الدعم، وسيتم الرد عليك في أقرب وقت.");
+    return ok(threadView(ticket));
+  }
+
+  // ---- customer support: admin side ----
+  if (path === "/admin/tickets" && method === "GET") {
+    if (!admin) return err(403, "غير مسموح");
+    if (!can("ticket:reply")) return err(403, "لا تملك صلاحية إدارة الدعم");
+    const items = [...db.tickets]
+      .sort((a, b) => b.lastMessageAt.localeCompare(a.lastMessageAt))
+      .map(ticketSummary);
+    return ok({ items });
+  }
+  if (seg[0] === "admin" && seg[1] === "tickets" && seg.length === 3 && method === "GET") {
+    if (!admin) return err(403, "غير مسموح");
+    if (!can("ticket:reply")) return err(403, "لا تملك صلاحية إدارة الدعم");
+    const ticket = db.tickets.find((t) => t.id === seg[2]);
+    if (!ticket) return err(404, "غير موجود");
+    return ok(ticketDetail(ticket));
+  }
+  if (seg[0] === "admin" && seg[1] === "tickets" && seg[3] === "reply" && method === "POST") {
+    if (!admin) return err(403, "غير مسموح");
+    if (!can("ticket:reply")) return err(403, "لا تملك صلاحية إدارة الدعم");
+    const ticket = db.tickets.find((t) => t.id === seg[2]);
+    if (!ticket) return err(404, "غير موجود");
+    const b = body as AdminReplyRequest;
+    pushMsg(ticket, "admin", admin.fullName, b.content, b.internal);
+    if (!b.internal) {
+      ticket.escalated = true;
+      if (!ticket.assignedAdminId) ticket.assignedAdminId = admin.id;
+      if (ticket.status === "new" || ticket.status === "assigned") ticket.status = "in_progress";
+    }
+    pushAudit(admin, b.internal ? "ticket:note" : "ticket:reply", ticket.id);
+    return ok(ticketDetail(ticket));
+  }
+  if (seg[0] === "admin" && seg[1] === "tickets" && seg[3] === "assign" && method === "POST") {
+    if (!admin) return err(403, "غير مسموح");
+    if (!can("ticket:reply")) return err(403, "لا تملك صلاحية إدارة الدعم");
+    const ticket = db.tickets.find((t) => t.id === seg[2]);
+    if (!ticket) return err(404, "غير موجود");
+    ticket.assignedAdminId = admin.id;
+    if (ticket.status === "new") ticket.status = "assigned";
+    pushAudit(admin, "ticket:assign", ticket.id);
+    return ok(ticketDetail(ticket));
+  }
+  if (seg[0] === "admin" && seg[1] === "tickets" && seg[3] === "status" && method === "POST") {
+    if (!admin) return err(403, "غير مسموح");
+    if (!can("ticket:reply")) return err(403, "لا تملك صلاحية إدارة الدعم");
+    const ticket = db.tickets.find((t) => t.id === seg[2]);
+    if (!ticket) return err(404, "غير موجود");
+    const b = body as TicketStatusUpdate;
+    ticket.status = b.status;
+    pushAudit(admin, `ticket:status:${b.status}`, ticket.id);
+    return ok(ticketDetail(ticket));
+  }
+
+  // ---- admin & RBAC management ----
+  if (path === "/admin/team" && method === "GET") {
+    if (!admin) return err(403, "غير مسموح");
+    if (!can("admin:manage")) return err(403, "لا تملك صلاحية إدارة المشرفين");
+    const items = db.users.filter((u) => u.role === "admin").map(teamMember);
+    return ok({ items });
+  }
+  if (path === "/admin/team" && method === "POST") {
+    if (!admin) return err(403, "غير مسموح");
+    if (!can("admin:create")) return err(403, "لا تملك صلاحية إنشاء مشرفين");
+    const b = body as CreateAdminRequest;
+    if (db.users.some((u) => u.email === b.email)) return err(409, "هذا البريد مسجّل بالفعل");
+    const created: MockUser = {
+      id: nextId("usr"),
+      fullName: b.fullName,
+      email: b.email,
+      phone: "01000000000",
+      role: "admin",
+      verificationStatus: "verified",
+      verificationRejectedAt: null,
+      verificationResubmitAfter: null,
+      verificationRejectionReason: null,
+      createdAt: new Date().toISOString(),
+      kyc: { completedSteps: [], verifiedAt: new Date().toISOString() },
+      quotas: { matchUsed: 0, matchLimit: 3, optimizerUsed: 0, optimizerLimit: 2, freeListingUsed: false },
+      adminRole: b.role,
+      capabilities: ROLE_CAPABILITIES[b.role],
+      disabled: false,
+      lastLoginAt: null,
+    };
+    db.users.push(created);
+    pushAudit(admin, "admin:create", created.id);
+    return ok(teamMember(created));
+  }
+  if (seg[0] === "admin" && seg[1] === "team" && seg.length === 3 && method === "PATCH") {
+    if (!admin) return err(403, "غير مسموح");
+    if (!can("admin:manage")) return err(403, "لا تملك صلاحية إدارة المشرفين");
+    const target = db.users.find((u) => u.id === seg[2] && u.role === "admin");
+    if (!target) return err(404, "غير موجود");
+    const b = body as UpdateAdminRequest;
+    if (b.role) {
+      target.adminRole = b.role;
+      target.capabilities = ROLE_CAPABILITIES[b.role];
+    }
+    if (typeof b.disabled === "boolean") target.disabled = b.disabled;
+    pushAudit(admin, "admin:update", target.id);
+    return ok(teamMember(target));
+  }
+  if (seg[0] === "admin" && seg[1] === "team" && seg[3] === "reset-password" && method === "POST") {
+    if (!admin) return err(403, "غير مسموح");
+    if (!can("admin:manage")) return err(403, "لا تملك صلاحية إدارة المشرفين");
+    const target = db.users.find((u) => u.id === seg[2] && u.role === "admin");
+    if (!target) return err(404, "غير موجود");
+    pushAudit(admin, "admin:reset-password", target.id);
+    return ok({ sent: true });
+  }
+  if (path === "/admin/audit-log" && method === "GET") {
+    if (!admin) return err(403, "غير مسموح");
+    if (!can("admin:manage")) return err(403, "لا تملك صلاحية الاطلاع على السجل");
+    return ok({ items: db.auditLog.slice(0, 50) });
+  }
+  if (path === "/admin/login-history" && method === "GET") {
+    if (!admin) return err(403, "غير مسموح");
+    if (!can("admin:manage")) return err(403, "لا تملك صلاحية الاطلاع على السجل");
+    return ok({ items: db.loginHistory });
   }
 
   // ---- legal chat ----

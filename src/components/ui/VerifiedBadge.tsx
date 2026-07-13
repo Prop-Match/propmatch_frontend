@@ -1,4 +1,4 @@
-import { BadgeCheck, Clock, ShieldQuestion } from "lucide-react";
+import { BadgeCheck, Clock, ShieldQuestion, XCircle } from "lucide-react";
 import { cn } from "@/src/utils/cn";
 import type { VerificationStatus } from "@/src/lib/api/contracts/auth";
 
@@ -7,9 +7,9 @@ const config: Record<
   { label: string; className: string; Icon: typeof BadgeCheck }
 > = {
   verified: { label: "مالك موثّق الهوية", className: "bg-success-tint text-success", Icon: BadgeCheck },
-  pending: { label: "التحقق قيد المراجعة", className: "bg-pending-tint text-pending", Icon: Clock },
+  pending_review: { label: "التحقق قيد المراجعة", className: "bg-pending-tint text-pending", Icon: Clock },
   unverified: { label: "غير موثّق", className: "bg-background text-muted", Icon: ShieldQuestion },
-  locked: { label: "التحقق موقوف", className: "bg-error-tint text-error", Icon: ShieldQuestion },
+  rejected: { label: "التحقق مرفوض", className: "bg-error-tint text-error", Icon: XCircle },
 };
 
 export function VerifiedBadge({
