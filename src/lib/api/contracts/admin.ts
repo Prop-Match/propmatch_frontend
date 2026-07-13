@@ -102,9 +102,8 @@ export type AdminStats = z.infer<typeof AdminStatsSchema>;
 
 export const KycReviewDetailSchema = z.object({
   userId: z.string(),
-  extractedName: z.string(),
-  nationalIdLast4: z.string(),
-  matchConfidence: z.number(),
+  userName: z.string(),
+  documents: z.array(z.object({ type: z.string(), label: z.string(), uploadedAt: z.string() })),
   submittedAt: z.string(),
 });
 export type KycReviewDetail = z.infer<typeof KycReviewDetailSchema>;

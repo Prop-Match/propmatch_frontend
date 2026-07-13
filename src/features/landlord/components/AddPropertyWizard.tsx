@@ -74,7 +74,10 @@ export function AddPropertyWizard() {
   function submit(values: AddPropertyForm) {
     create.mutate(values, {
       onSuccess: (res: CreatePropertyResult) => {
-        if (res.requiresPayment) {
+        if (res.requiresVerification) {
+          toast("success", "تم حفظ مسودة الإعلان. أكمل التوثيق لنشر إعلاناتك");
+          router.push("/landlord/verify");
+        } else if (res.requiresPayment) {
           // 2nd+ listing: pay before it enters review.
           setPayment({ open: true, propertyId: res.property.id });
         } else {

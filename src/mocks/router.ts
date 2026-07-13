@@ -17,6 +17,7 @@ import {
   type UpdateAdminRequest,
 } from "@/src/lib/api/contracts/admin";
 import type { Capability } from "@/src/lib/api/contracts/common";
+import { verificationDocumentLabels, type VerificationDocumentType } from "@/src/lib/api/contracts/verification";
 import {
   db,
   findUserByToken,
@@ -43,7 +44,12 @@ export interface MockResponse {
 
 const ok = (body: unknown = { ok: true }): MockResponse => ({ status: 200, body });
 const err = (status: number, message: string): MockResponse => ({ status, body: { statusCode: status, message } });
+const codedErr = (status: number, code: string, message: string, extra: Record<string, unknown> = {}): MockResponse => ({
+  status,
+  body: { statusCode: status, code, message, ...extra },
+});
 const unauth = (): MockResponse => err(401, "Not authenticated");
+const VERIFICATION_COOLDOWN_MS = 24 * 60 * 60 * 1000;
 
 /* ------------------------------ support helpers ------------------------------ */
 
@@ -183,10 +189,13 @@ export function dispatch(
       fullName: b.fullName,
       email: b.email,
       phone: b.phone,
-      role: b.role,
+      role: "user",
       verificationStatus: "unverified",
+      verificationRejectedAt: null,
+      verificationResubmitAfter: null,
+      verificationRejectionReason: null,
       createdAt: new Date().toISOString(),
-      kyc: { completedSteps: [], attemptsUsed: 0, extractedName: null, nationalIdLast4: null, matchConfidence: null },
+      kyc: { completedSteps: [], verifiedAt: null },
       quotas: { matchUsed: 0, matchLimit: 3, optimizerUsed: 0, optimizerLimit: 2, freeListingUsed: false },
     };
     db.users.push(u);
@@ -260,9 +269,9 @@ export function dispatch(
   }
   if (path === "/landlord/properties" && method === "POST") {
     if (!user) return unauth();
-    if (user.verificationStatus !== "verified") return err(403, "يجب توثيق هويتك أولًا قبل إضافة عقار");
     const b = body as CreatePropertyRequest;
-    const needsPayment = user.quotas.freeListingUsed;
+    const isVerified = user.verificationStatus === "verified";
+    const needsPayment = isVerified && user.quotas.freeListingUsed;
     const property: PropertyDetail = {
       id: nextId("prop"),
       ownerId: user.id,
@@ -274,8 +283,8 @@ export function dispatch(
       area: b.area,
       furnished: b.furnished,
       boosted: false,
-      ownerVerified: true,
-      status: needsPayment ? "draft" : "pending",
+      ownerVerified: isVerified,
+      status: isVerified && !needsPayment ? "pending" : "draft",
       coverImage: b.photos[0] ?? null,
       location: b.location,
       type: b.type,
@@ -294,8 +303,12 @@ export function dispatch(
       rejectionReason: null,
     };
     db.properties.push(property);
+    if (!isVerified) {
+      pushAudit(user, "listing:draft_created_verification_required", property.id);
+      return ok({ property, requiresPayment: false, requiresVerification: true });
+    }
     if (!needsPayment) user.quotas.freeListingUsed = true;
-    return ok({ property, requiresPayment: needsPayment });
+    return ok({ property, requiresPayment: needsPayment, requiresVerification: false });
   }
   if (seg[0] === "landlord" && seg[1] === "properties" && seg[3] === "optimize-description" && method === "POST") {
     if (!user) return unauth();
@@ -370,13 +383,14 @@ export function dispatch(
     if (!user) return unauth();
     const now = Date.now();
     // Role-appropriate sample notifications.
+    const hasListings = db.properties.some((p) => p.ownerId === user.id);
     const base =
       user.role === "admin"
         ? [
             { id: "n1", kind: "review", title: "طلب توثيق جديد بحاجة لمراجعة", at: new Date(now - 3 * 60_000).toISOString() },
             { id: "n2", kind: "review", title: "عقار جديد قيد المراجعة", at: new Date(now - 22 * 60_000).toISOString() },
           ]
-        : user.role === "landlord"
+        : hasListings
           ? [
               { id: "n1", kind: "inquiry", title: "مستأجر مهتم بعقارك في حي الجامعة", at: new Date(now - 6 * 60_000).toISOString() },
               { id: "n2", kind: "listing", title: "تمت الموافقة على إعلانك", at: new Date(now - 60 * 60_000).toISOString() },
@@ -387,39 +401,61 @@ export function dispatch(
     return ok({ items: base, unread: base.length });
   }
 
-  // ---- eKYC ----
+  // ---- verification ----
   if (path === "/kyc/state" && method === "GET") {
     if (!user) return unauth();
+    const hasListingIntent = db.properties.some((p) => p.ownerId === user.id);
+    const cooldownActive = Boolean(
+      user.verificationResubmitAfter && new Date(user.verificationResubmitAfter).getTime() > Date.now(),
+    );
     return ok({
       status: user.verificationStatus,
       completedSteps: user.kyc.completedSteps,
-      attemptsUsed: user.kyc.attemptsUsed,
-      maxAttempts: 3,
-      extractedName: user.kyc.extractedName,
-      nationalIdLast4: user.kyc.nationalIdLast4,
-      matchConfidence: user.kyc.matchConfidence,
+      hasListingIntent,
+      canSubmit:
+        hasListingIntent &&
+        user.verificationStatus !== "verified" &&
+        user.verificationStatus !== "pending_review" &&
+        !cooldownActive,
+      rejectionReason: user.verificationRejectionReason ?? null,
+      rejectedAt: user.verificationRejectedAt ?? null,
+      resubmitAfter: user.verificationResubmitAfter ?? null,
+      verifiedAt: user.kyc.verifiedAt,
     });
   }
   if (path === "/kyc/upload" && method === "POST") {
     if (!user) return unauth();
-    if (user.verificationStatus === "locked") return err(403, "تم إيقاف التحقق، تواصل مع الدعم");
-    const b = body as { step: "id-front" | "id-back" | "selfie"; simulateBadQuality?: boolean };
+    if (user.verificationStatus === "verified") return codedErr(409, "ALREADY_VERIFIED", "تم توثيق هذا الحساب بالفعل");
+    if (user.verificationStatus === "pending_review") return codedErr(409, "VERIFICATION_ALREADY_PENDING", "طلب التوثيق قيد المراجعة بالفعل");
+    if (user.verificationResubmitAfter && new Date(user.verificationResubmitAfter).getTime() > Date.now()) {
+      return codedErr(429, "VERIFICATION_COOLDOWN_ACTIVE", "يجب الانتظار قبل إعادة إرسال التوثيق", {
+        resubmitAfter: user.verificationResubmitAfter,
+      });
+    }
+    const b = body as { step: VerificationDocumentType; simulateBadQuality?: boolean };
     if (b.simulateBadQuality) {
-      user.kyc.attemptsUsed++;
-      if (user.kyc.attemptsUsed >= 3) user.verificationStatus = "locked";
-      return ok({ step: b.step, accepted: false, reason: "جودة الصورة منخفضة، حاول في إضاءة أفضل" });
+      return ok({ step: b.step, accepted: false, reason: "المستند غير واضح، ارفع نسخة أوضح" });
     }
     if (!user.kyc.completedSteps.includes(b.step)) user.kyc.completedSteps.push(b.step);
     return ok({ step: b.step, accepted: true, reason: null });
   }
   if (path === "/kyc/submit" && method === "POST") {
     if (!user) return unauth();
-    if (user.kyc.completedSteps.length < 3) return err(400, "أكمل جميع الخطوات أولًا");
-    user.verificationStatus = "pending";
-    user.kyc.extractedName = user.fullName;
-    user.kyc.nationalIdLast4 = "4821";
-    user.kyc.matchConfidence = 91;
+    const hasListingIntent = db.properties.some((p) => p.ownerId === user.id);
+    if (!hasListingIntent) return codedErr(403, "LISTING_INTENT_REQUIRED", "ابدأ بإضافة مسودة إعلان قبل التوثيق");
+    if (user.verificationStatus === "verified") return codedErr(409, "ALREADY_VERIFIED", "تم توثيق هذا الحساب بالفعل");
+    if (user.verificationStatus === "pending_review") return codedErr(409, "VERIFICATION_ALREADY_PENDING", "طلب التوثيق قيد المراجعة بالفعل");
+    if (user.verificationResubmitAfter && new Date(user.verificationResubmitAfter).getTime() > Date.now()) {
+      return codedErr(429, "VERIFICATION_COOLDOWN_ACTIVE", "يجب الانتظار قبل إعادة إرسال التوثيق", {
+        resubmitAfter: user.verificationResubmitAfter,
+      });
+    }
+    if (user.kyc.completedSteps.length < 3) return err(400, "أكمل جميع المستندات أولًا");
+    user.verificationStatus = "pending_review";
+    user.verificationRejectedAt = null;
+    user.verificationResubmitAfter = null;
     db.kycSubmissions.push({ userId: user.id, submittedAt: new Date().toISOString(), reviewed: false });
+    pushAudit(user, "verification:submitted", user.id);
     return ok();
   }
 
@@ -569,12 +605,16 @@ export function dispatch(
     if (!admin) return err(403, "غير مسموح");
     const u = db.users.find((x) => x.id === seg[2]);
     if (!u) return err(404, "غير موجود");
+    const submission = db.kycSubmissions.find((s) => s.userId === u.id && !s.reviewed);
     return ok({
       userId: u.id,
-      extractedName: u.kyc.extractedName ?? u.fullName,
-      nationalIdLast4: u.kyc.nationalIdLast4 ?? "0000",
-      matchConfidence: u.kyc.matchConfidence ?? 0,
-      submittedAt: db.kycSubmissions.find((s) => s.userId === u.id)?.submittedAt ?? u.createdAt,
+      userName: u.fullName,
+      documents: u.kyc.completedSteps.map((type) => ({
+        type,
+        label: verificationDocumentLabels[type],
+        uploadedAt: submission?.submittedAt ?? u.createdAt,
+      })),
+      submittedAt: submission?.submittedAt ?? u.createdAt,
     });
   }
   if (seg[0] === "admin" && seg[1] === "kyc" && seg[3] === "review" && method === "POST") {
@@ -584,9 +624,33 @@ export function dispatch(
     const submission = db.kycSubmissions.find((s) => s.userId === seg[2] && !s.reviewed);
     if (!u || !submission) return err(409, "تمت مراجعة هذا الطلب بالفعل");
     const b = body as ReviewDecision;
-    u.verificationStatus = b.decision === "approve" ? "verified" : "unverified";
+    const rejectionReason = b.reason?.trim();
+    if (b.decision === "reject" && !rejectionReason) return err(400, "سبب الرفض مطلوب");
+    if (b.decision === "approve") {
+      u.verificationStatus = "verified";
+      u.kyc.verifiedAt = new Date().toISOString();
+      u.verificationRejectedAt = null;
+      u.verificationResubmitAfter = null;
+      u.verificationRejectionReason = null;
+      db.properties
+        .filter((p) => p.ownerId === u.id && p.status === "draft")
+        .forEach((p) => {
+          p.ownerVerified = true;
+          if (!u.quotas.freeListingUsed) {
+            p.status = "pending";
+            u.quotas.freeListingUsed = true;
+          }
+        });
+    } else {
+      const rejectedAt = new Date();
+      u.verificationStatus = "rejected";
+      u.verificationRejectedAt = rejectedAt.toISOString();
+      u.verificationResubmitAfter = new Date(rejectedAt.getTime() + VERIFICATION_COOLDOWN_MS).toISOString();
+      u.verificationRejectionReason = rejectionReason;
+      u.kyc.completedSteps = [];
+    }
     submission.reviewed = true;
-    pushAudit(admin, `kyc:${b.decision}`, u.id);
+    pushAudit(admin, `verification:${b.decision}`, u.id);
     return ok();
   }
 
@@ -702,8 +766,11 @@ export function dispatch(
       phone: "01000000000",
       role: "admin",
       verificationStatus: "verified",
+      verificationRejectedAt: null,
+      verificationResubmitAfter: null,
+      verificationRejectionReason: null,
       createdAt: new Date().toISOString(),
-      kyc: { completedSteps: [], attemptsUsed: 0, extractedName: null, nationalIdLast4: null, matchConfidence: null },
+      kyc: { completedSteps: [], verifiedAt: new Date().toISOString() },
       quotas: { matchUsed: 0, matchLimit: 3, optimizerUsed: 0, optimizerLimit: 2, freeListingUsed: false },
       adminRole: b.role,
       capabilities: ROLE_CAPABILITIES[b.role],
