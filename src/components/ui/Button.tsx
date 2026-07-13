@@ -18,8 +18,11 @@ export interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElemen
 const variantClasses: Record<Variant, string> = {
   primary:
     "bg-primary text-white hover:bg-primary-dark active:bg-primary-dark disabled:bg-primary/50",
+  // Solid primary fill with white text — every teal-colored button reads the
+  // same. Call sites can still override bg/text via className (e.g. the
+  // white-on-hero button on the landing page).
   secondary:
-    "bg-primary-tint text-primary-dark hover:bg-primary/15 active:bg-primary/20 disabled:opacity-50",
+    "bg-primary text-white hover:bg-primary-dark active:bg-primary-dark disabled:bg-primary/50",
   ghost: "bg-transparent text-primary hover:bg-primary-tint active:bg-primary/10 disabled:opacity-50",
   danger: "bg-error text-white hover:bg-error/90 active:bg-error/80 disabled:bg-error/50",
 };
