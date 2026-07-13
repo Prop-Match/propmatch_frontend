@@ -3,6 +3,7 @@ import { LayoutDashboard, LogOut } from "lucide-react";
 import Link from "next/link";
 import { requireSession } from "@/src/lib/api/serverSession";
 import { NotificationBell } from "@/src/components/nav/RoleNav";
+import { AdminNavLinks } from "@/src/components/nav/AdminNavLinks";
 
 /**
  * Admin surface is desktop-first (data-dense). Only role === "admin" may
@@ -24,6 +25,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
               لوحة المشرف
             </span>
           </div>
+          <AdminNavLinks />
           <div className="flex items-center gap-3">
             <NotificationBell />
             <span className="text-small font-semibold text-body-text">{user.fullName}</span>
