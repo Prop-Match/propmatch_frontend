@@ -189,7 +189,7 @@ export function dispatch(
       fullName: b.fullName,
       email: b.email,
       phone: b.phone,
-      role: "user",
+      role: b.role,
       verificationStatus: "unverified",
       verificationRejectedAt: null,
       verificationResubmitAfter: null,

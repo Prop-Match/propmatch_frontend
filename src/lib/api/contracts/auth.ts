@@ -11,11 +11,10 @@ import { z } from "zod";
  * reconciled, but new signups use "user"; listing capability comes from
  * verificationStatus, not role.
  */
-export const AccountRoleSchema = z.enum(["user", "tenant", "landlord", "both", "admin"]);
+export const AccountRoleSchema = z.enum(["tenant", "landlord", "admin"]);
 export type AccountRole = z.infer<typeof AccountRoleSchema>;
 
-/** New public signups always create the uniform base user role. */
-export const SignupRoleSchema = z.literal("user");
+export const SignupRoleSchema = z.enum(["tenant", "landlord"]);
 export type SignupRole = z.infer<typeof SignupRoleSchema>;
 
 export const RegisterRequestSchema = z.object({

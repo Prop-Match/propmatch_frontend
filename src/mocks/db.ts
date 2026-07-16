@@ -200,11 +200,11 @@ export interface MockDb {
 
 function seed(): MockDb {
   const users: MockUser[] = [
-    makeUser("usr_tenant", "أحمد محمود", "tenant@example.com", "user", "unverified"),
-    makeUser("usr_landlord", "محمد السيد", "landlord@example.com", "user", "verified"),
-    makeUser("usr_both", "سارة إبراهيم", "both@example.com", "user", "unverified"),
+    makeUser("usr_tenant", "أحمد محمود", "tenant@example.com", "tenant", "unverified"),
+    makeUser("usr_landlord", "محمد السيد", "landlord@example.com", "landlord", "verified"),
+    makeUser("usr_both", "سارة إبراهيم", "both@example.com", "tenant", "unverified"),
     makeUser("usr_admin", "مشرف المنصة", "admin@example.com", "admin", "verified", "super-admin"),
-    makeUser("usr_landlord2", "خالد عبد العزيز", "landlord2@example.com", "user", "pending_review"),
+    makeUser("usr_landlord2", "خالد عبد العزيز", "landlord2@example.com", "landlord", "pending_review"),
     // Additional admin team members (managed via /admin/team).
     makeUser("usr_admin2", "منى فؤاد", "support@example.com", "admin", "verified", "customer-support"),
     makeUser("usr_admin3", "طارق حسن", "listings@example.com", "admin", "verified", "listings-manager"),

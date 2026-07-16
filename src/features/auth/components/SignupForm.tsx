@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useRegister } from "../hooks/useSession";
 import { signupFormSchema, type SignupForm as SignupFormValues } from "../validation/schemas";
-import { InputField } from "@/src/components/ui/Field";
+import { InputField, SelectField } from "@/src/components/ui/Field";
 import { Button } from "@/src/components/ui/Button";
 import { isApiClientError } from "@/src/lib/api/browserClient";
 import { landingAfterLogin } from "../roleRouting";
@@ -22,7 +22,7 @@ export function SignupForm() {
     formState: { errors, isSubmitting },
   } = useForm<SignupFormValues>({
     resolver: zodResolver(signupFormSchema),
-    defaultValues: { role: "user" },
+    defaultValues: { role: "tenant" },
   });
 
   async function onSubmit(values: SignupFormValues) {
@@ -62,7 +62,15 @@ export function SignupForm() {
         {...register("password")}
       />
 
-      <input type="hidden" value="user" {...register("role")} />
+      <SelectField
+        label="نوع الحساب"
+        error={errors.role?.message}
+        options={[
+          { value: "tenant", label: "مستأجر (أبحث عن سكن)" },
+          { value: "landlord", label: "مالك عقار (أعرض وحدات للإيجار)" },
+        ]}
+        {...register("role")}
+      />
 
       {errors.root && (
         <p className="rounded-control bg-error-tint px-3 py-2 text-small text-error" role="alert">

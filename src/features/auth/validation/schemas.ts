@@ -11,6 +11,6 @@ export const signupFormSchema = z.object({
   email: z.string().email("بريد إلكتروني غير صالح"),
   phone: z.string().regex(/^01\d{9}$/, "رقم هاتف مصري غير صالح"),
   password: z.string().min(8, "كلمة المرور 8 أحرف على الأقل"),
-  role: z.literal("user").default("user"),
+  role: z.enum(["tenant", "landlord"], { required_error: "يرجى تحديد نوع الحساب" }),
 });
 export type SignupForm = z.infer<typeof signupFormSchema>;
