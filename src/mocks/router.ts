@@ -1,40 +1,41 @@
 import type { LoginRequest, RegisterRequest } from "@/src/lib/api/contracts/auth";
-import type { MatchIntake, ContactStateResponse } from "@/src/lib/api/contracts/match";
+import type { KycDocument, KycSubmitRequest } from "@/src/lib/api/contracts/verification";
 import type { CreatePropertyRequest } from "@/src/lib/api/contracts/property";
-import type { CreateCheckoutRequest } from "@/src/lib/api/contracts/payment";
+import type { CreateTenantRequest } from "@/src/lib/api/contracts/tenantRequest";
+import type { CreateOfferRequest } from "@/src/lib/api/contracts/offer";
+import type { CreateCheckoutRequest, PaymentType } from "@/src/lib/api/contracts/payment";
+import type { CreateReviewRequest } from "@/src/lib/api/contracts/review";
+import type { CreatePartnerLeadRequest } from "@/src/lib/api/contracts/partnerLead";
+import type { CreateLeaseContract } from "@/src/lib/api/contracts/contract";
 import type { ReviewDecision } from "@/src/lib/api/contracts/admin";
+import { ADMIN_CAPABILITIES } from "@/src/lib/api/contracts/admin";
 import type { ChatRequest } from "@/src/lib/api/contracts/support";
-import type { PropertyDetail, PropertySummary } from "@/src/lib/api/contracts/property";
-import type {
-  AdminReplyRequest,
-  SupportSendRequest,
-  TicketStatusUpdate,
-} from "@/src/lib/api/contracts/support";
-import {
-  ROLE_CAPABILITIES,
-  adminRoleLabels,
-  type CreateAdminRequest,
-  type UpdateAdminRequest,
-} from "@/src/lib/api/contracts/admin";
-import type { Capability } from "@/src/lib/api/contracts/common";
-import { verificationDocumentLabels, type VerificationDocumentType } from "@/src/lib/api/contracts/verification";
 import {
   db,
   findUserByToken,
+  isVerified,
   nextId,
-  pushAudit,
+  notify,
+  quotaFor,
   tokensFor,
   toPublicUser,
-  type MockTicket,
+  verificationStatusFor,
+  type MockOffer,
+  type MockProperty,
+  type MockTenantRequest,
   type MockUser,
 } from "./db";
 
 /**
- * Framework-agnostic mock backend. Given a method/path/body/auth, returns a
- * status + JSON body. Shared by the standalone dev server (src/mocks/standalone)
- * and the Jest MSW passthrough handler (src/mocks/handlers), so there is a
- * single source of truth for mock behaviour and no reliance on fragile
- * fetch interception inside the Next.js server.
+ * Framework-agnostic mock backend mirroring the Final ERD + SRS. Given a
+ * method/path/body/auth it returns a status + JSON body. Shared by the
+ * standalone dev server (src/mocks/standalone) and Jest's MSW passthrough
+ * (src/mocks/handlers) — one source of truth, no fetch-interception fragility.
+ *
+ * Mirrors the backend's real duties: role guards, progressive-verification
+ * gates, quota enforcement, and — critically — **PII omission** (owner phone +
+ * manual address are never serialised until the viewer's connection unlocks
+ * them). See docs/analysis/rbac.md.
  */
 
 export interface MockResponse {
@@ -48,122 +49,144 @@ const codedErr = (status: number, code: string, message: string, extra: Record<s
   status,
   body: { statusCode: status, code, message, ...extra },
 });
-const unauth = (): MockResponse => err(401, "Not authenticated");
-const VERIFICATION_COOLDOWN_MS = 24 * 60 * 60 * 1000;
+const unauth = (): MockResponse => err(401, "غير مصرح");
+const forbidden = (message = "غير مسموح") => err(403, message);
 
-/* ------------------------------ support helpers ------------------------------ */
+/** Progressive verification (SRS 3.1/3.4) — one gate, one message. */
+const needsVerification = () =>
+  codedErr(403, "VERIFICATION_REQUIRED", "وثّق هويتك أولًا لإتمام هذا الإجراء");
 
-const SUPPORT_KB: { keys: string[]; answer: string }[] = [
-  { keys: ["توثيق", "هوية", "بطاقة", "تحقق"], answer: "لتوثيق هويتك، افتح «توثيق الهوية» وارفع صورتي البطاقة وصورة شخصية. تتم المراجعة خلال وقت قصير." },
-  { keys: ["دفع", "فلوس", "رسوم", "بايموب", "paymob", "فيزا"], answer: "المدفوعات تتم مباشرة بالجنيه المصري عبر Paymob. أول إعلان مجاني، وبعده تُدفع رسوم بسيطة لكل إعلان." },
-  { keys: ["إعلان", "عقار", "نشر", "صور"], answer: "لإضافة عقار، ادخل «إضافة عقار» واملأ الخطوات. تأكد أن كل صورة أقل من 5 ميجابايت. يظهر الإعلان للمستأجرين بعد موافقة الإدارة." },
-  { keys: ["مطابقة", "بحث", "سكن"], answer: "استخدم «المطابقة الذكية» ووصّف سكنك المثالي بكلماتك، وسنعرض لك أقرب العقارات المطابقة مع نسبة التطابق." },
-  { keys: ["تواصل", "رقم", "هاتف", "مالك"], answer: "رقم المالك يظهر بعد تأكيد التطابق من الطرفين حمايةً للخصوصية." },
-];
+/** Quota exhausted → paywall (PRO-18). */
+const quotaExhausted = (paymentType: PaymentType, priceEgp: number) =>
+  codedErr(403, "QUOTA_EXHAUSTED", "انتهت محاولاتك المجانية", { trigger: "payment", paymentType, priceEgp });
 
-function aiSupportReply(message: string): string {
-  const hit = SUPPORT_KB.find((k) => k.keys.some((key) => message.includes(key)));
-  if (hit) return `${hit.answer}\n\nإذا احتجت مساعدة إضافية، يمكنك طلب التحدث مع موظف بشري.`;
-  return "شكرًا لتواصلك. لم أفهم استفسارك تمامًا — هل يمكنك التوضيح أكثر؟ أو يمكنك طلب التحدث مع موظف بشري.";
+const PRICES: Record<PaymentType, number> = {
+  NEW_LISTING: 100,
+  BOOST_LISTING: 75,
+  REFILL_MATCHES: 30,
+  OFFER_PACK: 50,
+};
+
+/* ------------------------------ projections ------------------------------ */
+
+function coverImage(propertyId: string): string | null {
+  const imgs = db.propertyImages.filter((i) => i.propertyId === propertyId);
+  return (imgs.find((i) => i.isCover) ?? imgs[0])?.imageUrl ?? null;
 }
 
-function pushMsg(ticket: MockTicket, author: MockTicket["messages"][number]["author"], authorName: string, content: string, internal = false) {
-  const at = new Date().toISOString();
-  ticket.messages.push({ id: nextId("sm"), author, authorName, content, internal, at });
-  ticket.lastMessageAt = at;
-}
-
-/** A ticket the user can still talk into (not closed). */
-function openTicketFor(userId: string): MockTicket | undefined {
-  return [...db.tickets].reverse().find((t) => t.userId === userId && t.status !== "closed");
-}
-function latestTicketFor(userId: string): MockTicket | undefined {
-  return [...db.tickets].reverse().find((t) => t.userId === userId);
-}
-
-function threadView(ticket: MockTicket | undefined) {
-  if (!ticket) return { ticketId: null, status: null, escalated: false, messages: [] };
-  return {
-    ticketId: ticket.id,
-    status: ticket.status,
-    escalated: ticket.escalated,
-    // Never expose internal admin notes to the customer.
-    messages: ticket.messages.filter((m) => !m.internal),
-  };
-}
-
-function ticketSummary(t: MockTicket) {
-  const u = db.users.find((x) => x.id === t.userId);
-  const assignee = t.assignedAdminId ? db.users.find((x) => x.id === t.assignedAdminId) : null;
-  return {
-    id: t.id,
-    subject: t.subject,
-    userName: u?.fullName ?? "عميل",
-    status: t.status,
-    assignedAdminName: assignee?.fullName ?? null,
-    lastMessageAt: t.lastMessageAt,
-    createdAt: t.createdAt,
-  };
-}
-function ticketDetail(t: MockTicket) {
-  return { ...ticketSummary(t), userId: t.userId, assignedAdminId: t.assignedAdminId, messages: t.messages };
-}
-
-function teamMember(u: MockUser) {
-  return {
-    id: u.id,
-    fullName: u.fullName,
-    email: u.email,
-    role: u.adminRole ?? "read-only",
-    capabilities: u.capabilities ?? [],
-    disabled: u.disabled ?? false,
-    lastLoginAt: u.lastLoginAt ?? null,
-    createdAt: u.createdAt,
-  };
-}
-
-function toSummary(p: PropertyDetail): PropertySummary {
+function toSummary(p: MockProperty) {
   return {
     id: p.id,
     title: p.title,
-    neighborhood: p.neighborhood,
-    monthlyRent: p.monthlyRent,
-    rooms: p.rooms,
+    governorate: p.governorate,
+    city: p.city,
+    district: p.district,
+    propertyType: p.propertyType,
+    rentAmount: p.rentAmount,
+    areaM2: p.areaM2,
+    bedrooms: p.bedrooms,
     bathrooms: p.bathrooms,
-    area: p.area,
-    furnished: p.furnished,
-    boosted: p.boosted,
-    ownerVerified: p.ownerVerified,
+    isFurnished: p.isFurnished,
+    isBoosted: p.isBoosted,
     status: p.status,
-    coverImage: p.coverImage,
+    coverImage: coverImage(p.id),
+    ownerVerified: isVerified(p.ownerId),
   };
 }
 
-function scoreProperty(intake: MatchIntake, p: PropertyDetail): number {
-  let score = 55;
-  if (p.monthlyRent >= intake.budgetMin && p.monthlyRent <= intake.budgetMax) score += 15;
-  else score -= 20;
-  if (intake.neighborhoods.some((n) => p.neighborhood.includes(n) || n.includes(p.neighborhood))) score += 12;
-  if (p.type === intake.propertyType) score += 6;
-  if (intake.furnished === "any" || (intake.furnished === "yes") === p.furnished) score += 5;
-  if (p.rooms >= intake.roomsNeeded) score += 4;
-  if (intake.needsAc && p.amenities.includes("ac")) score += 3;
-  if (intake.needsInternet && p.amenities.includes("internet")) score += 3;
-  if (intake.needsParking && p.amenities.includes("garage")) score += 3;
-  score += (intake.idealDescription.length % 7) - 3;
-  if (p.boosted) score += 2;
+/**
+ * THE PII GATE. Contact unlocks only for a viewer who has an ACCEPTED offer or
+ * a CONNECTED match on this property — or for the owner/an admin. Anyone else
+ * simply never receives the fields (omission, not client-side hiding).
+ */
+function contactUnlocked(property: MockProperty, viewer: MockUser | null): boolean {
+  if (!viewer) return false;
+  if (viewer.id === property.ownerId || viewer.role === "admin") return true;
+  const connected = db.matchConnections.some(
+    (m) => m.propertyId === property.id && m.tenantId === viewer.id && m.status === "CONNECTED",
+  );
+  if (connected) return true;
+  return db.offers.some(
+    (o) =>
+      o.propertyId === property.id &&
+      o.status === "ACCEPTED" &&
+      db.tenantRequests.find((r) => r.id === o.tenantRequestId)?.tenantId === viewer.id,
+  );
+}
+
+function toDetail(p: MockProperty, viewer: MockUser | null) {
+  const unlocked = contactUnlocked(p, viewer);
+  const owner = db.users.find((u) => u.id === p.ownerId);
+  return {
+    ...toSummary(p),
+    description: p.description,
+    propertyAroundServices: p.propertyAroundServices,
+    hasElevator: p.hasElevator,
+    hasParking: p.hasParking,
+    ownerId: p.ownerId,
+    images: db.propertyImages
+      .filter((i) => i.propertyId === p.id)
+      .sort((a, b) => a.displayOrder - b.displayOrder)
+      .map((i) => ({ id: i.id, imageUrl: i.imageUrl, displayOrder: i.displayOrder, isCover: i.isCover })),
+    contactRevealed: unlocked,
+    // Omitted entirely until the gate passes.
+    manualAddress: unlocked ? p.manualAddress : null,
+    ownerPhoneNumber: unlocked ? (owner?.phoneNumber ?? null) : null,
+    ownerName: unlocked ? (owner?.fullName ?? null) : null,
+    rejectionReason: p.rejectionReason,
+    approvedAt: p.approvedAt,
+    createdAt: p.createdAt,
+  };
+}
+
+/**
+ * Mock stand-in for the backend's hybrid matcher (PRO-11): hard filters +
+ * semantic similarity → 0–100. Real scoring is server-side/AI; the frontend
+ * treats it as authoritative and volatile (ASSUMPTIONS.md #7).
+ */
+function scoreRequestAgainstProperty(r: MockTenantRequest, p: MockProperty): number {
+  let score = 50;
+  if (p.rentAmount >= r.minBudget && p.rentAmount <= r.maxBudget) score += 18;
+  else score -= 22;
+  if (r.preferredLocations.includes(p.district)) score += 12;
+  if (p.propertyType === r.propertyType) score += 8;
+  if (p.bedrooms >= r.requiredBedrooms) score += 5;
+  if (!r.needsFurnished || p.isFurnished) score += 5;
+  // Free-text lifestyle overlap with the property's surroundings — the bit the
+  // real system does with embeddings.
+  const words = r.lifestyleRequirements.split(/\s+/).filter((w) => w.length > 3);
+  const haystack = `${p.description} ${p.propertyAroundServices ?? ""}`;
+  score += Math.min(10, words.filter((w) => haystack.includes(w)).length * 2);
+  // Flexibility softens a mismatch.
+  score += Math.round((r.flexibilityScore - 5) * 0.6);
+  if (p.isBoosted) score += 2;
   return Math.max(5, Math.min(98, Math.round(score)));
 }
 
-const PRICES: Record<string, number> = { listing: 100, boost: 75, "matchmaker-refill": 30 };
+function offerToReceived(o: MockOffer, viewerId: string) {
+  const p = db.properties.find((x) => x.id === o.propertyId)!;
+  const req = db.tenantRequests.find((x) => x.id === o.tenantRequestId);
+  const owner = db.users.find((u) => u.id === o.ownerId);
+  const accepted = o.status === "ACCEPTED" && req?.tenantId === viewerId;
+  return {
+    id: o.id,
+    tenantRequestId: o.tenantRequestId,
+    property: toSummary(p),
+    pitchMessage: o.pitchMessage,
+    proposedPrice: o.proposedPrice,
+    status: o.status,
+    matchScore: req ? scoreRequestAgainstProperty(req, p) : null,
+    createdAt: o.createdAt,
+    // Landlord identity stays hidden until the tenant accepts.
+    ownerName: accepted ? (owner?.fullName ?? null) : null,
+    ownerPhoneNumber: accepted ? (owner?.phoneNumber ?? null) : null,
+  };
+}
+
 const LEGAL_KEYWORDS = ["إيجار", "عقد", "قانون", "مالك", "مستأجر", "إخلاء", "شقة", "عقار", "تأمين", "زيادة", "فسخ", "إخطار", "محكمة", "ملكية"];
 
-let liveQueueTick = 0;
+/* -------------------------------- dispatch -------------------------------- */
 
-/**
- * @param path pathname without query string, no leading slash removed (e.g. "/properties/prop_1")
- * @param query URLSearchParams for the request
- */
 export function dispatch(
   method: string,
   path: string,
@@ -173,12 +196,16 @@ export function dispatch(
 ): MockResponse {
   const user = findUserByToken(authorization);
   const seg = path.replace(/^\//, "").split("/");
+  const admin = user?.role === "admin" ? user : null;
+  const requireAdmin = () => (admin ? null : forbidden());
 
-  // ---- auth ----
+  /* ---------------------------- auth (PRO-02) ---------------------------- */
   if (method === "POST" && path === "/auth/login") {
     const b = body as LoginRequest;
     const u = db.users.find((x) => x.email === b.email);
     if (!u || b.password.length < 8) return err(401, "البريد الإلكتروني أو كلمة المرور غير صحيحة");
+    if (!u.isActive) return forbidden("هذا الحساب موقوف");
+    u.lastLoginAt = new Date().toISOString();
     return ok(tokensFor(u));
   }
   if (method === "POST" && path === "/auth/register") {
@@ -188,17 +215,26 @@ export function dispatch(
       id: nextId("usr"),
       fullName: b.fullName,
       email: b.email,
-      phone: b.phone,
+      passwordHash: "mock",
+      phoneNumber: b.phoneNumber,
       role: b.role,
-      verificationStatus: "unverified",
-      verificationRejectedAt: null,
-      verificationResubmitAfter: null,
-      verificationRejectionReason: null,
+      isActive: true,
+      lastLoginAt: new Date().toISOString(),
       createdAt: new Date().toISOString(),
-      kyc: { completedSteps: [], verifiedAt: null },
-      quotas: { matchUsed: 0, matchLimit: 3, optimizerUsed: 0, optimizerLimit: 2, freeListingUsed: false },
+      updatedAt: new Date().toISOString(),
     };
     db.users.push(u);
+    // ERD: USER_QUOTA is landlords-only.
+    if (b.role === "landlord") {
+      db.quotas.push({
+        id: nextId("quota"),
+        userId: u.id,
+        freeListingsLeft: 1,
+        optimizerUsesLeft: 2,
+        freeOffersLeft: 3,
+        lastResetDate: null,
+      });
+    }
     return ok(tokensFor(u));
   }
   if (method === "POST" && path === "/auth/refresh") {
@@ -210,616 +246,783 @@ export function dispatch(
     return user ? ok(toPublicUser(user)) : unauth();
   }
   if (method === "POST" && path === "/auth/forgot-password") {
-    // Always returns ok regardless of whether the email exists, so the
-    // response can't be used to enumerate accounts (see ASSUMPTIONS.md).
+    // Always ok — never reveals whether the account exists.
     return ok({ sent: true });
   }
 
-  // ---- properties (public browse) ----
+  /* ------------------------- verification (PRO-03) ------------------------ */
+  if (method === "GET" && path === "/verification") {
+    if (!user) return unauth();
+    const v = db.verifications.find((x) => x.userId === user.id);
+    const status = verificationStatusFor(user.id);
+    return ok({
+      status,
+      uploadedDocuments: v ? (["national_id_front", "national_id_back", "selfie"] as KycDocument[]) : [],
+      nationalIdLast4: v ? v.nationalId.slice(-4) : null,
+      rejectionReason: v?.rejectionReason ?? null,
+      submittedAt: v?.submittedAt ?? null,
+      reviewedAt: v?.reviewedAt ?? null,
+      canSubmit: status === "NOT_SUBMITTED" || status === "REJECTED" || status === "RESUBMISSION_REQUIRED",
+    });
+  }
+  if (method === "POST" && path === "/verification/upload") {
+    if (!user) return unauth();
+    const b = body as { document: KycDocument; simulateUnreadable?: boolean };
+    if (b.simulateUnreadable) {
+      return ok({ document: b.document, accepted: false, reason: "تعذّرت قراءة المستند، ارفع صورة أوضح" });
+    }
+    return ok({ document: b.document, accepted: true, reason: null });
+  }
+  if (method === "POST" && path === "/verification/submit") {
+    if (!user) return unauth();
+    const status = verificationStatusFor(user.id);
+    if (status === "APPROVED") return codedErr(409, "ALREADY_VERIFIED", "تم توثيق هذا الحساب بالفعل");
+    if (status === "PENDING") return codedErr(409, "VERIFICATION_PENDING", "طلبك قيد المراجعة بالفعل");
+    const b = body as KycSubmitRequest;
+    const existing = db.verifications.find((x) => x.userId === user.id);
+    if (existing) {
+      // Resubmission after rejection: reuse the row, back to PENDING.
+      existing.nationalId = b.nationalId;
+      existing.status = "PENDING";
+      existing.rejectionReason = null;
+      existing.reviewedBy = null;
+      existing.reviewedAt = null;
+      existing.submittedAt = new Date().toISOString();
+    } else {
+      db.verifications.push({
+        id: nextId("ekyc"),
+        userId: user.id,
+        nationalId: b.nationalId,
+        nationalIdFrontUrl: "https://cdn.example.com/id-front.jpg",
+        nationalIdBackUrl: "https://cdn.example.com/id-back.jpg",
+        selfieUrl: "https://cdn.example.com/selfie.jpg",
+        status: "PENDING",
+        reviewedBy: null,
+        rejectionReason: null,
+        submittedAt: new Date().toISOString(),
+        reviewedAt: null,
+      });
+    }
+    return ok();
+  }
+
+  /* -------------------- properties: browse (PRO-11) ---------------------- */
   if (method === "GET" && path === "/properties") {
+    // Hard SQL-style filters first, then a naive text match standing in for
+    // the semantic layer.
     const q = query.get("q")?.trim();
-    let items = db.properties.filter((p) => p.status === "approved");
-    if (q) items = items.filter((p) => p.title.includes(q) || p.neighborhood.includes(q) || p.description.includes(q));
-    items = [...items].sort((a, b) => Number(b.boosted) - Number(a.boosted));
+    const city = query.get("city")?.trim();
+    const propertyType = query.get("propertyType")?.trim();
+    const minRent = Number(query.get("minRent") ?? "") || undefined;
+    const maxRent = Number(query.get("maxRent") ?? "") || undefined;
+    const bedrooms = Number(query.get("bedrooms") ?? "") || undefined;
+    const furnished = query.get("isFurnished");
+
+    let items = db.properties.filter((p) => p.status === "APPROVED");
+    if (city) items = items.filter((p) => p.city === city);
+    if (propertyType) items = items.filter((p) => p.propertyType === propertyType);
+    if (minRent !== undefined) items = items.filter((p) => p.rentAmount >= minRent);
+    if (maxRent !== undefined) items = items.filter((p) => p.rentAmount <= maxRent);
+    if (bedrooms !== undefined) items = items.filter((p) => p.bedrooms >= bedrooms);
+    if (furnished === "true") items = items.filter((p) => p.isFurnished);
+    if (q) {
+      items = items.filter((p) =>
+        `${p.title} ${p.description} ${p.district} ${p.propertyAroundServices ?? ""}`.includes(q),
+      );
+    }
+    items = [...items].sort((a, b) => Number(b.isBoosted) - Number(a.isBoosted));
     return ok({ items: items.map(toSummary), total: items.length, page: 1, pageSize: 50 });
   }
   if (method === "GET" && seg[0] === "properties" && seg.length === 2) {
-    const property = db.properties.find((p) => p.id === seg[1]);
-    if (!property) return err(404, "غير موجود");
-    if (property.status !== "approved" && user?.id !== property.ownerId && user?.role !== "admin") return err(404, "غير موجود");
-    return ok(property);
+    const p = db.properties.find((x) => x.id === seg[1]);
+    if (!p) return err(404, "غير موجود");
+    if (p.status !== "APPROVED" && user?.id !== p.ownerId && user?.role !== "admin") return err(404, "غير موجود");
+    return ok(toDetail(p, user));
   }
-
-  // ---- gated contact ----
-  if (seg[0] === "properties" && seg[2] === "contact") {
+  if (method === "GET" && seg[0] === "properties" && seg[2] === "connection") {
     if (!user) return unauth();
-    const propertyId = seg[1];
-    if (method === "GET") {
-      const inquiry = db.inquiries.find((i) => i.propertyId === propertyId && i.tenantId === user.id);
-      const property = db.properties.find((p) => p.id === propertyId);
-      let response: ContactStateResponse;
-      if (!inquiry || !property) response = { status: "none", contact: null };
-      else if (inquiry.status === "accepted") {
-        const owner = db.users.find((u) => u.id === property.ownerId);
-        response = {
-          status: "accepted",
-          contact: owner ? { fullName: owner.fullName, phone: owner.phone, email: owner.email } : null,
-        };
-      } else response = { status: inquiry.status, contact: null };
-      return ok(response);
+    const p = db.properties.find((x) => x.id === seg[1]);
+    if (!p) return err(404, "غير موجود");
+    const conn = db.matchConnections.find((m) => m.propertyId === p.id && m.tenantId === user.id);
+    const unlocked = contactUnlocked(p, user);
+    const owner = db.users.find((u) => u.id === p.ownerId);
+    return ok({
+      status: conn?.status ?? null,
+      contact:
+        unlocked && owner
+          ? { ownerName: owner.fullName, ownerPhoneNumber: owner.phoneNumber, manualAddress: p.manualAddress }
+          : null,
+    });
+  }
+  if (method === "POST" && seg[0] === "properties" && seg[2] === "interest") {
+    if (!user) return unauth();
+    if (user.role !== "tenant") return forbidden();
+    const p = db.properties.find((x) => x.id === seg[1] && x.status === "APPROVED");
+    if (!p) return err(404, "غير موجود");
+    let conn = db.matchConnections.find((m) => m.propertyId === p.id && m.tenantId === user.id);
+    if (!conn) {
+      conn = {
+        id: nextId("mc"),
+        tenantId: user.id,
+        propertyId: p.id,
+        ownerId: p.ownerId,
+        matchScore: 70,
+        status: "INTERESTED",
+        createdAt: new Date().toISOString(),
+      };
+      db.matchConnections.push(conn);
     }
-    if (method === "POST") {
-      const property = db.properties.find((p) => p.id === propertyId && p.status === "approved");
-      if (!property) return err(404, "غير موجود");
-      let inquiry = db.inquiries.find((i) => i.propertyId === property.id && i.tenantId === user.id);
-      if (!inquiry) {
-        inquiry = { id: nextId("inq"), propertyId: property.id, tenantId: user.id, status: "requested", createdAt: new Date().toISOString() };
-        db.inquiries.push(inquiry);
-        property.inquiriesCount++;
-      }
-      return ok({ status: inquiry.status, contact: null });
-    }
+    return ok({ status: conn.status, contact: null });
   }
 
-  // ---- landlord ----
+  /* ------------------ properties: reviews (SRS 3.7) ---------------------- */
+  if (method === "GET" && seg[0] === "properties" && seg[2] === "reviews") {
+    const approved = db.reviews.filter((r) => r.propertyId === seg[1] && r.status === "APPROVED");
+    const total = approved.length;
+    const averageRating = total ? Number((approved.reduce((s, r) => s + r.rating, 0) / total).toFixed(1)) : null;
+    return ok({
+      items: approved.map((r) => ({
+        id: r.id,
+        propertyId: r.propertyId,
+        reviewerName: db.users.find((u) => u.id === r.reviewerId)?.fullName ?? "مستأجر",
+        rating: r.rating,
+        comment: r.comment,
+        status: r.status,
+        createdAt: r.createdAt,
+      })),
+      averageRating,
+      total,
+      distribution: [5, 4, 3, 2, 1].map((rating) => ({
+        rating,
+        count: approved.filter((r) => r.rating === rating).length,
+      })),
+    });
+  }
+  if (method === "POST" && path === "/reviews") {
+    if (!user) return unauth();
+    if (user.role !== "tenant") return forbidden();
+    if (!isVerified(user.id)) return needsVerification();
+    const b = body as CreateReviewRequest;
+    const p = db.properties.find((x) => x.id === b.propertyId && x.status === "APPROVED");
+    if (!p) return err(404, "غير موجود");
+    const review = {
+      id: nextId("rev"),
+      reviewerId: user.id,
+      propertyId: b.propertyId,
+      rating: b.rating,
+      comment: b.comment,
+      status: "PENDING" as const,
+      reviewedBy: null,
+      createdAt: new Date().toISOString(),
+    };
+    db.reviews.push(review);
+    notify(p.ownerId, "NEW_REVIEW_SUBMITTED", "تقييم جديد", "تم إرسال تقييم جديد لعقارك للمراجعة.");
+    return ok({ id: review.id, status: review.status });
+  }
+
+  /* -------------------- landlord: listings (PRO-04) ---------------------- */
   if (path === "/landlord/properties" && method === "GET") {
     if (!user) return unauth();
+    if (user.role !== "landlord") return forbidden();
     const items = db.properties.filter((p) => p.ownerId === user.id);
     return ok({ items: items.map(toSummary), total: items.length, page: 1, pageSize: 50 });
   }
   if (path === "/landlord/properties" && method === "POST") {
     if (!user) return unauth();
+    if (user.role !== "landlord") return forbidden();
+    if (!isVerified(user.id)) return needsVerification();
+    const quota = quotaFor(user.id);
+    if (!quota || quota.freeListingsLeft <= 0) return quotaExhausted("NEW_LISTING", PRICES.NEW_LISTING);
+
     const b = body as CreatePropertyRequest;
-    const isVerified = user.verificationStatus === "verified";
-    const needsPayment = isVerified && user.quotas.freeListingUsed;
-    const property: PropertyDetail = {
+    const property: MockProperty = {
       id: nextId("prop"),
       ownerId: user.id,
-      title: `${b.type === "studio" ? "ستوديو" : "عقار"} في ${b.location.neighborhood}`.slice(0, 60),
-      neighborhood: b.location.neighborhood,
-      monthlyRent: b.monthlyRent,
-      rooms: b.rooms,
-      bathrooms: b.bathrooms,
-      area: b.area,
-      furnished: b.furnished,
-      boosted: false,
-      ownerVerified: isVerified,
-      status: isVerified && !needsPayment ? "pending" : "draft",
-      coverImage: b.photos[0] ?? null,
-      location: b.location,
-      type: b.type,
-      deposit: b.deposit,
-      leaseDurationMonths: b.leaseDurationMonths,
-      floor: b.floor,
-      hasElevator: b.hasElevator,
-      finish: b.finish,
-      orientation: b.orientation,
-      amenities: b.amenities,
-      conditions: b.conditions,
+      title: b.title,
       description: b.description,
-      photos: b.photos,
-      inquiriesCount: 0,
-      createdAt: new Date().toISOString(),
+      governorate: b.governorate,
+      city: b.city,
+      district: b.district,
+      manualAddress: b.manualAddress,
+      propertyType: b.propertyType,
+      propertyAroundServices: b.propertyAroundServices ?? null,
+      rentAmount: b.rentAmount,
+      areaM2: b.areaM2,
+      bedrooms: b.bedrooms,
+      bathrooms: b.bathrooms,
+      isFurnished: b.isFurnished,
+      hasElevator: b.hasElevator,
+      hasParking: b.hasParking,
+      contactRevealed: false,
+      status: "PENDING", // ERD default — admin must approve (PRO-04)
+      isBoosted: false,
+      approvedBy: null,
+      approvedAt: null,
       rejectionReason: null,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
     };
     db.properties.push(property);
-    if (!isVerified) {
-      pushAudit(user, "listing:draft_created_verification_required", property.id);
-      return ok({ property, requiresPayment: false, requiresVerification: true });
-    }
-    if (!needsPayment) user.quotas.freeListingUsed = true;
-    return ok({ property, requiresPayment: needsPayment, requiresVerification: false });
+    b.images.forEach((imageUrl, i) =>
+      db.propertyImages.push({
+        id: nextId("img"),
+        propertyId: property.id,
+        imageUrl,
+        displayOrder: i,
+        isCover: i === 0,
+      }),
+    );
+    quota.freeListingsLeft -= 1;
+    return ok({ property: toDetail(property, user) });
   }
   if (seg[0] === "landlord" && seg[1] === "properties" && seg[3] === "optimize-description" && method === "POST") {
     if (!user) return unauth();
-    if (user.quotas.optimizerUsed >= user.quotas.optimizerLimit)
-      return { status: 403, body: { statusCode: 403, message: "انتهت محاولاتك المجانية", trigger: "payment", product: "matchmaker-refill", priceEgp: 50 } };
+    if (user.role !== "landlord") return forbidden();
+    const quota = quotaFor(user.id);
+    if (!quota || quota.optimizerUsesLeft <= 0) return quotaExhausted("REFILL_MATCHES", PRICES.REFILL_MATCHES);
     const b = body as { description: string };
     if (b.description.length > 2000) return err(400, "الوصف أطول من المسموح");
-    user.quotas.optimizerUsed++;
+    quota.optimizerUsesLeft -= 1;
     return ok({
-      optimized: `«${b.description.slice(0, 80).trim()}…» — عقار مميز في موقع استراتيجي بالمنصورة! يتمتع بتشطيبات عالية الجودة ومساحات ذكية الاستغلال، على بعد خطوات من الخدمات والمواصلات. فرصة حقيقية للباحثين عن سكن مريح بعقد واضح ومن مالك موثّق الهوية مباشرة — بدون وسطاء وبدون عمولة.`,
-      remainingUses: user.quotas.optimizerLimit - user.quotas.optimizerUsed,
+      optimized: `${b.description.trim()}\n\nفرصة مميزة لن تتكرر! وحدة بموقع استراتيجي وتشطيبات عالية الجودة، على بعد خطوات من الخدمات والمواصلات. تعامل مباشر مع المالك — بدون وسطاء وبدون عمولة.`,
+      optimizerUsesLeft: quota.optimizerUsesLeft,
     });
   }
   if (seg[0] === "landlord" && seg[1] === "properties" && seg[3] === "boost" && method === "POST") {
     if (!user) return unauth();
-    const property = db.properties.find((p) => p.id === seg[2] && p.ownerId === user.id);
-    if (!property) return err(404, "غير موجود");
-    return ok({ requiresPayment: true });
+    const p = db.properties.find((x) => x.id === seg[2] && x.ownerId === user.id);
+    if (!p) return err(404, "غير موجود");
+    return quotaExhausted("BOOST_LISTING", PRICES.BOOST_LISTING);
   }
-  if (path === "/landlord/inquiries" && method === "GET") {
+  if (seg[0] === "landlord" && seg[1] === "properties" && seg[3] === "archive" && method === "POST") {
     if (!user) return unauth();
-    const myIds = new Set(db.properties.filter((p) => p.ownerId === user.id).map((p) => p.id));
-    const items = db.inquiries
-      .filter((i) => myIds.has(i.propertyId))
-      .map((i) => {
-        const tenant = db.users.find((u) => u.id === i.tenantId);
-        const property = db.properties.find((p) => p.id === i.propertyId);
-        return {
-          id: i.id,
-          status: i.status,
-          createdAt: i.createdAt,
-          propertyTitle: property?.title ?? "",
-          propertyId: i.propertyId,
-          tenantVerified: tenant?.verificationStatus === "verified",
-          tenantName: i.status === "accepted" ? (tenant?.fullName ?? "") : "مستأجر مهتم",
-          tenantPhone: i.status === "accepted" ? (tenant?.phone ?? null) : null,
-        };
-      });
+    const p = db.properties.find((x) => x.id === seg[2] && x.ownerId === user.id);
+    if (!p) return err(404, "غير موجود");
+    p.status = "ARCHIVED"; // ERD: soft-archive, never delete (ASSUMPTIONS #16)
+    return ok();
+  }
+
+  /* ------------- reverse marketplace: tenant requests (PRO-05) ----------- */
+  if (path === "/tenant/requests" && method === "GET") {
+    if (!user) return unauth();
+    const items = db.tenantRequests
+      .filter((r) => r.tenantId === user.id)
+      .map((r) => ({
+        ...r,
+        offersCount: db.offers.filter((o) => o.tenantRequestId === r.id).length,
+      }));
     return ok({ items });
   }
-  if (seg[0] === "landlord" && seg[1] === "inquiries" && seg[3] === "accept" && method === "POST") {
+  if (path === "/tenant/requests" && method === "POST") {
     if (!user) return unauth();
-    const inquiry = db.inquiries.find((i) => i.id === seg[2]);
-    if (!inquiry) return err(404, "غير موجود");
-    const property = db.properties.find((p) => p.id === inquiry.propertyId);
-    if (property?.ownerId !== user.id) return err(403, "غير مسموح");
-    inquiry.status = "accepted";
-    pushAudit(user, "inquiry:accept", inquiry.id);
+    if (user.role !== "tenant") return forbidden();
+    if (!isVerified(user.id)) return needsVerification();
+    const b = body as CreateTenantRequest;
+    const request: MockTenantRequest = {
+      id: nextId("req"),
+      tenantId: user.id,
+      ...b,
+      status: "PENDING", // admin approval required (anti-spam, SRS 3.2.2)
+      approvedBy: null,
+      rejectionReason: null,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    db.tenantRequests.push(request);
+    return ok({ ...request, offersCount: 0 });
+  }
+  if (seg[0] === "tenant" && seg[1] === "requests" && seg[3] === "close" && method === "POST") {
+    if (!user) return unauth();
+    const r = db.tenantRequests.find((x) => x.id === seg[2] && x.tenantId === user.id);
+    if (!r) return err(404, "غير موجود");
+    r.status = "CLOSED";
     return ok();
   }
 
-  // ---- matching ----
-  if (path === "/match/quota" && method === "GET") {
+  /* ---------- reverse marketplace: landlord browses requests (PRO-13) ---- */
+  if (path === "/landlord/requests" && method === "GET") {
     if (!user) return unauth();
-    return ok({ remaining: Math.max(0, user.quotas.matchLimit - user.quotas.matchUsed) });
-  }
-  if (path === "/match" && method === "POST") {
-    if (!user) return unauth();
-    if (user.quotas.matchUsed >= user.quotas.matchLimit)
-      return { status: 403, body: { statusCode: 403, message: "انتهت محاولاتك المجانية", trigger: "payment", product: "matchmaker-refill", priceEgp: 30 } };
-    const intake = body as MatchIntake;
-    user.quotas.matchUsed++;
-    const results = db.properties
-      .filter((p) => p.status === "approved")
-      .map((p) => ({ property: toSummary(p), matchScore: scoreProperty(intake, p) }))
-      .sort((a, b) => b.matchScore - a.matchScore);
-    return ok({ results, remainingFreeMatches: Math.max(0, user.quotas.matchLimit - user.quotas.matchUsed) });
-  }
-
-  // ---- notifications ----
-  if (path === "/notifications" && method === "GET") {
-    if (!user) return unauth();
-    const now = Date.now();
-    // Role-appropriate sample notifications.
-    const hasListings = db.properties.some((p) => p.ownerId === user.id);
-    const base =
-      user.role === "admin"
-        ? [
-            { id: "n1", kind: "review", title: "طلب توثيق جديد بحاجة لمراجعة", at: new Date(now - 3 * 60_000).toISOString() },
-            { id: "n2", kind: "review", title: "عقار جديد قيد المراجعة", at: new Date(now - 22 * 60_000).toISOString() },
-          ]
-        : hasListings
-          ? [
-              { id: "n1", kind: "inquiry", title: "مستأجر مهتم بعقارك في حي الجامعة", at: new Date(now - 6 * 60_000).toISOString() },
-              { id: "n2", kind: "listing", title: "تمت الموافقة على إعلانك", at: new Date(now - 60 * 60_000).toISOString() },
-            ]
-          : [
-              { id: "n1", kind: "match", title: "لديك نتائج مطابقة جديدة", at: new Date(now - 10 * 60_000).toISOString() },
-            ];
-    return ok({ items: base, unread: base.length });
+    if (user.role !== "landlord") return forbidden();
+    if (!isVerified(user.id)) return needsVerification();
+    const myProps = db.properties.filter((p) => p.ownerId === user.id && p.status === "APPROVED");
+    const items = db.tenantRequests
+      .filter((r) => r.status === "APPROVED")
+      .map((r) => ({
+        id: r.id,
+        minBudget: r.minBudget,
+        maxBudget: r.maxBudget,
+        preferredLocations: r.preferredLocations,
+        propertyType: r.propertyType,
+        requiredBedrooms: r.requiredBedrooms,
+        needsFurnished: r.needsFurnished,
+        flexibilityScore: r.flexibilityScore,
+        lifestyleRequirements: r.lifestyleRequirements,
+        createdAt: r.createdAt,
+        // Tenant identity intentionally absent until they accept an offer.
+        matchScore: myProps.length
+          ? Math.max(...myProps.map((p) => scoreRequestAgainstProperty(r, p)))
+          : null,
+        alreadyOffered: db.offers.some((o) => o.tenantRequestId === r.id && o.ownerId === user.id),
+      }))
+      .sort((a, b) => (b.matchScore ?? 0) - (a.matchScore ?? 0));
+    return ok({ items });
   }
 
-  // ---- verification ----
-  if (path === "/kyc/state" && method === "GET") {
+  /* ------------------ reverse marketplace: offers (PRO-12) --------------- */
+  if (path === "/landlord/offers" && method === "GET") {
     if (!user) return unauth();
-    const hasListingIntent = db.properties.some((p) => p.ownerId === user.id);
-    const cooldownActive = Boolean(
-      user.verificationResubmitAfter && new Date(user.verificationResubmitAfter).getTime() > Date.now(),
+    const items = db.offers
+      .filter((o) => o.ownerId === user.id)
+      .map((o) => ({
+        id: o.id,
+        tenantRequestId: o.tenantRequestId,
+        property: toSummary(db.properties.find((p) => p.id === o.propertyId)!),
+        pitchMessage: o.pitchMessage,
+        proposedPrice: o.proposedPrice,
+        status: o.status,
+        createdAt: o.createdAt,
+      }));
+    return ok({ items });
+  }
+  if (path === "/landlord/offers" && method === "POST") {
+    if (!user) return unauth();
+    if (user.role !== "landlord") return forbidden();
+    if (!isVerified(user.id)) return needsVerification();
+    const quota = quotaFor(user.id);
+    if (!quota || quota.freeOffersLeft <= 0) return quotaExhausted("OFFER_PACK", PRICES.OFFER_PACK);
+
+    const b = body as CreateOfferRequest;
+    const request = db.tenantRequests.find((r) => r.id === b.tenantRequestId && r.status === "APPROVED");
+    if (!request) return err(404, "الطلب غير متاح");
+    const property = db.properties.find((p) => p.id === b.propertyId && p.ownerId === user.id);
+    if (!property) return err(404, "العقار غير موجود");
+    if (property.status !== "APPROVED") return forbidden("لا يمكن تقديم عرض بعقار غير معتمد");
+    if (db.offers.some((o) => o.tenantRequestId === b.tenantRequestId && o.ownerId === user.id))
+      return err(409, "قدّمت عرضًا على هذا الطلب بالفعل");
+
+    const offer: MockOffer = {
+      id: nextId("off"),
+      ownerId: user.id,
+      tenantRequestId: b.tenantRequestId,
+      propertyId: b.propertyId,
+      pitchMessage: b.pitchMessage,
+      proposedPrice: b.proposedPrice,
+      status: "SENT",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    db.offers.push(offer);
+    quota.freeOffersLeft -= 1;
+    notify(
+      request.tenantId,
+      "NEW_OFFER_RECEIVED",
+      "عرض جديد على طلبك",
+      "وصلك عرض جديد من أحد الملّاك — اطّلع عليه الآن.",
+      "/tenant/offers",
     );
+    return ok({ id: offer.id, status: offer.status, freeOffersLeft: quota.freeOffersLeft });
+  }
+
+  /* ----------------- reverse marketplace: tenant inbox ------------------- */
+  if (path === "/tenant/offers" && method === "GET") {
+    if (!user) return unauth();
+    const myRequestIds = db.tenantRequests.filter((r) => r.tenantId === user.id).map((r) => r.id);
+    const items = db.offers
+      .filter((o) => myRequestIds.includes(o.tenantRequestId))
+      .map((o) => offerToReceived(o, user.id))
+      .sort((a, b) => (b.matchScore ?? 0) - (a.matchScore ?? 0));
+    return ok({ items });
+  }
+  if (seg[0] === "tenant" && seg[1] === "offers" && seg[3] === "view" && method === "POST") {
+    if (!user) return unauth();
+    const o = db.offers.find((x) => x.id === seg[2]);
+    if (!o) return err(404, "غير موجود");
+    // VIEWED means the tenant actually opened it (ASSUMPTIONS #13).
+    if (o.status === "SENT") o.status = "VIEWED";
+    return ok(offerToReceived(o, user.id));
+  }
+  if (seg[0] === "tenant" && seg[1] === "offers" && seg[3] === "accept" && method === "POST") {
+    if (!user) return unauth();
+    if (!isVerified(user.id)) return needsVerification();
+    const o = db.offers.find((x) => x.id === seg[2]);
+    if (!o) return err(404, "غير موجود");
+    const request = db.tenantRequests.find((r) => r.id === o.tenantRequestId);
+    if (!request || request.tenantId !== user.id) return forbidden();
+    if (o.status === "REJECTED") return err(409, "هذا العرض مرفوض");
+    const property = db.properties.find((p) => p.id === o.propertyId);
+    if (!property || property.status !== "APPROVED") return forbidden("العقار لم يعد متاحًا");
+
+    o.status = "ACCEPTED";
+    // Accepting fulfils the request; siblings stay SENT but non-acceptable.
+    request.status = "FULFILLED";
+    property.contactRevealed = true;
+
+    const connection = {
+      id: nextId("mc"),
+      tenantId: user.id,
+      propertyId: property.id,
+      ownerId: o.ownerId,
+      matchScore: scoreRequestAgainstProperty(request, property),
+      status: "CONNECTED" as const,
+      createdAt: new Date().toISOString(),
+    };
+    db.matchConnections.push(connection);
+
+    const owner = db.users.find((u) => u.id === o.ownerId)!;
+    notify(owner.id, "NEW_MATCH", "تم قبول عرضك", "قبل المستأجر عرضك — بيانات التواصل متاحة الآن.", "/landlord/offers");
     return ok({
-      status: user.verificationStatus,
-      completedSteps: user.kyc.completedSteps,
-      hasListingIntent,
-      canSubmit:
-        hasListingIntent &&
-        user.verificationStatus !== "verified" &&
-        user.verificationStatus !== "pending_review" &&
-        !cooldownActive,
-      rejectionReason: user.verificationRejectionReason ?? null,
-      rejectedAt: user.verificationRejectedAt ?? null,
-      resubmitAfter: user.verificationResubmitAfter ?? null,
-      verifiedAt: user.kyc.verifiedAt,
+      offerId: o.id,
+      status: o.status,
+      ownerName: owner.fullName,
+      ownerPhoneNumber: owner.phoneNumber,
+      manualAddress: property.manualAddress,
+      matchConnectionId: connection.id,
     });
   }
-  if (path === "/kyc/upload" && method === "POST") {
+  if (seg[0] === "tenant" && seg[1] === "offers" && seg[3] === "reject" && method === "POST") {
     if (!user) return unauth();
-    if (user.verificationStatus === "verified") return codedErr(409, "ALREADY_VERIFIED", "تم توثيق هذا الحساب بالفعل");
-    if (user.verificationStatus === "pending_review") return codedErr(409, "VERIFICATION_ALREADY_PENDING", "طلب التوثيق قيد المراجعة بالفعل");
-    if (user.verificationResubmitAfter && new Date(user.verificationResubmitAfter).getTime() > Date.now()) {
-      return codedErr(429, "VERIFICATION_COOLDOWN_ACTIVE", "يجب الانتظار قبل إعادة إرسال التوثيق", {
-        resubmitAfter: user.verificationResubmitAfter,
-      });
-    }
-    const b = body as { step: VerificationDocumentType; simulateBadQuality?: boolean };
-    if (b.simulateBadQuality) {
-      return ok({ step: b.step, accepted: false, reason: "المستند غير واضح، ارفع نسخة أوضح" });
-    }
-    if (!user.kyc.completedSteps.includes(b.step)) user.kyc.completedSteps.push(b.step);
-    return ok({ step: b.step, accepted: true, reason: null });
-  }
-  if (path === "/kyc/submit" && method === "POST") {
-    if (!user) return unauth();
-    const hasListingIntent = db.properties.some((p) => p.ownerId === user.id);
-    if (!hasListingIntent) return codedErr(403, "LISTING_INTENT_REQUIRED", "ابدأ بإضافة مسودة إعلان قبل التوثيق");
-    if (user.verificationStatus === "verified") return codedErr(409, "ALREADY_VERIFIED", "تم توثيق هذا الحساب بالفعل");
-    if (user.verificationStatus === "pending_review") return codedErr(409, "VERIFICATION_ALREADY_PENDING", "طلب التوثيق قيد المراجعة بالفعل");
-    if (user.verificationResubmitAfter && new Date(user.verificationResubmitAfter).getTime() > Date.now()) {
-      return codedErr(429, "VERIFICATION_COOLDOWN_ACTIVE", "يجب الانتظار قبل إعادة إرسال التوثيق", {
-        resubmitAfter: user.verificationResubmitAfter,
-      });
-    }
-    if (user.kyc.completedSteps.length < 3) return err(400, "أكمل جميع المستندات أولًا");
-    user.verificationStatus = "pending_review";
-    user.verificationRejectedAt = null;
-    user.verificationResubmitAfter = null;
-    db.kycSubmissions.push({ userId: user.id, submittedAt: new Date().toISOString(), reviewed: false });
-    pushAudit(user, "verification:submitted", user.id);
+    const o = db.offers.find((x) => x.id === seg[2]);
+    if (!o) return err(404, "غير موجود");
+    o.status = "REJECTED";
     return ok();
   }
 
-  // ---- payments ----
+  /* ---------------------------- favorites -------------------------------- */
+  if (path === "/tenant/favorites" && method === "GET") {
+    if (!user) return unauth();
+    const items = db.favorites
+      .filter((f) => f.tenantId === user.id)
+      .map((f) => db.properties.find((p) => p.id === f.propertyId))
+      .filter((p): p is MockProperty => Boolean(p))
+      .map(toSummary);
+    return ok({ items });
+  }
+  if (path === "/tenant/favorites" && method === "POST") {
+    if (!user) return unauth();
+    const b = body as { propertyId: string };
+    const existing = db.favorites.find((f) => f.tenantId === user.id && f.propertyId === b.propertyId);
+    if (existing) return ok({ favorited: true });
+    db.favorites.push({ id: nextId("fav"), tenantId: user.id, propertyId: b.propertyId, createdAt: new Date().toISOString() });
+    return ok({ favorited: true });
+  }
+  if (seg[0] === "tenant" && seg[1] === "favorites" && seg.length === 3 && method === "DELETE") {
+    if (!user) return unauth();
+    db.favorites = db.favorites.filter((f) => !(f.tenantId === user.id && f.propertyId === seg[2]));
+    return ok({ favorited: false });
+  }
+
+  /* ------------------------ payments & quota (PRO-14/18) ----------------- */
+  if (path === "/quota" && method === "GET") {
+    if (!user) return unauth();
+    const q = quotaFor(user.id);
+    // Tenants have no quota row — the UI must tolerate null.
+    return ok(q ? { freeListingsLeft: q.freeListingsLeft, optimizerUsesLeft: q.optimizerUsesLeft, freeOffersLeft: q.freeOffersLeft, lastResetDate: q.lastResetDate } : null);
+  }
   if (path === "/payments/checkout" && method === "POST") {
     if (!user) return unauth();
     const b = body as CreateCheckoutRequest;
     const payment = {
       id: nextId("pay"),
       userId: user.id,
-      context: b.context,
+      paymobOrderId: nextId("pmob"),
+      paymobTransactionId: null,
+      amount: PRICES[b.paymentType],
+      currency: "EGP" as const,
+      paymentType: b.paymentType,
       propertyId: b.propertyId,
-      amountEgp: PRICES[b.context],
-      status: "pending" as const,
-      entitlementActive: false,
+      status: "PENDING" as const,
+      paidAt: null,
       createdAt: new Date().toISOString(),
     };
     db.payments.push(payment);
-    return ok({ checkoutId: payment.id, amountEgp: payment.amountEgp, context: payment.context });
+    return ok({
+      paymobOrderId: payment.paymobOrderId,
+      amount: payment.amount,
+      currency: "EGP",
+      paymentType: payment.paymentType,
+      iframeUrl: null, // real build renders the Paymob iframe here
+    });
   }
   if (seg[0] === "payments" && seg[2] === "confirm" && method === "POST") {
     if (!user) return unauth();
-    const payment = db.payments.find((p) => p.id === seg[1] && p.userId === user.id);
+    const payment = db.payments.find((p) => p.paymobOrderId === seg[1] && p.userId === user.id);
     if (!payment) return err(404, "غير موجود");
     const b = body as { cardNumber: string };
-    if (b.cardNumber.endsWith("0000")) {
-      payment.status = "failed";
-      return ok({ checkoutId: payment.id, status: "failed", entitlementActive: false });
+    if (b.cardNumber.replace(/\s/g, "").endsWith("0000")) {
+      payment.status = "FAILED";
+      return ok({ paymobOrderId: payment.paymobOrderId, status: "FAILED" });
     }
-    payment.status = "success";
+    payment.status = "SUCCESS";
+    payment.paidAt = new Date().toISOString();
+    payment.paymobTransactionId = nextId("txn");
+    // The real webhook credits the quota — simulate its latency so the client
+    // must poll rather than trust its own success state (ASSUMPTIONS #17).
     setTimeout(() => {
-      payment.entitlementActive = true;
-      if (payment.context === "matchmaker-refill") user.quotas.matchLimit += 3;
-      else if (payment.context === "boost" && payment.propertyId) {
+      const q = quotaFor(payment.userId);
+      if (!q) return;
+      if (payment.paymentType === "NEW_LISTING") q.freeListingsLeft += 1;
+      if (payment.paymentType === "REFILL_MATCHES") q.optimizerUsesLeft += 2;
+      if (payment.paymentType === "OFFER_PACK") q.freeOffersLeft += 3;
+      if (payment.paymentType === "BOOST_LISTING" && payment.propertyId) {
         const prop = db.properties.find((p) => p.id === payment.propertyId);
-        if (prop) prop.boosted = true;
-      } else if (payment.context === "listing" && payment.propertyId) {
-        const prop = db.properties.find((p) => p.id === payment.propertyId);
-        if (prop && prop.status === "draft") prop.status = "pending";
+        if (prop) prop.isBoosted = true;
       }
+      notify(payment.userId, "PAYMENT_SUCCESS", "تم الدفع بنجاح", "تم تحديث رصيدك.");
     }, 1200);
-    return ok({ checkoutId: payment.id, status: "success", entitlementActive: false });
+    return ok({ paymobOrderId: payment.paymobOrderId, status: "SUCCESS" });
   }
   if (seg[0] === "payments" && seg.length === 2 && method === "GET") {
     if (!user) return unauth();
-    const payment = db.payments.find((p) => p.id === seg[1] && p.userId === user.id);
+    const payment = db.payments.find((p) => p.paymobOrderId === seg[1] && p.userId === user.id);
     if (!payment) return err(404, "غير موجود");
-    return ok({ checkoutId: payment.id, status: payment.status, entitlementActive: payment.entitlementActive });
-  }
-
-  // ---- admin ----
-  // A disabled admin loses access entirely.
-  const admin = user?.role === "admin" && !user.disabled ? user : null;
-  const adminCaps: Capability[] = admin?.capabilities ?? [];
-  const can = (cap: Capability) => adminCaps.includes(cap);
-
-  if (path === "/admin/session" && method === "GET") {
-    if (!admin) return err(403, "غير مسموح");
     return ok({
-      id: admin.id,
-      fullName: admin.fullName,
-      roleName: admin.adminRole ? adminRoleLabels[admin.adminRole] : "مشرف",
-      capabilities: adminCaps,
+      id: payment.id,
+      paymobOrderId: payment.paymobOrderId,
+      paymobTransactionId: payment.paymobTransactionId,
+      amount: payment.amount,
+      currency: payment.currency,
+      paymentType: payment.paymentType,
+      status: payment.status,
+      paidAt: payment.paidAt,
+      createdAt: payment.createdAt,
     });
   }
+
+  /* --------------------------- contracts (PRO-15) ------------------------ */
+  if (path === "/contracts/prefill" && method === "GET") {
+    if (!user) return unauth();
+    const v = db.verifications.find((x) => x.userId === user.id && x.status === "APPROVED");
+    return ok({ fullName: v ? user.fullName : null, nationalId: v ? v.nationalId : null });
+  }
+  if (path === "/contracts" && method === "POST") {
+    if (!user) return unauth();
+    const b = body as CreateLeaseContract;
+    const contract = {
+      id: nextId("lease"),
+      generatedByUserId: user.id,
+      ...b,
+      customClauses: b.customClauses ?? null,
+      pdfUrl: `https://cdn.example.com/contracts/${nextId("pdf")}.pdf`,
+      createdAt: new Date().toISOString(),
+    };
+    db.leaseContracts.push(contract);
+    return ok(contract);
+  }
+
+  /* ------------------------- partner leads (PRO-16) ---------------------- */
+  if (path === "/partner-leads" && method === "POST") {
+    if (!user) return unauth();
+    const b = body as CreatePartnerLeadRequest;
+    const created = b.serviceTypes.map((serviceType) => {
+      const lead = {
+        id: nextId("lead"),
+        tenantId: user.id,
+        serviceType,
+        partnerName: serviceType === "MOVING" ? "نقل المنصورة" : "تأمين دلتا",
+        status: "PENDING" as const,
+        createdAt: new Date().toISOString(),
+      };
+      db.partnerLeads.push(lead);
+      return lead;
+    });
+    return ok({ items: created });
+  }
+
+  /* --------------------------- notifications ----------------------------- */
+  if (path === "/notifications" && method === "GET") {
+    if (!user) return unauth();
+    const items = db.notifications.filter((n) => n.userId === user.id).slice(0, 20);
+    return ok({ items, unread: items.filter((n) => !n.isRead).length });
+  }
+  if (seg[0] === "notifications" && seg[2] === "read" && method === "POST") {
+    if (!user) return unauth();
+    const n = db.notifications.find((x) => x.id === seg[1] && x.userId === user.id);
+    if (n) n.isRead = true;
+    return ok();
+  }
+  if (path === "/notifications/read-all" && method === "POST") {
+    if (!user) return unauth();
+    db.notifications.filter((n) => n.userId === user.id).forEach((n) => (n.isRead = true));
+    return ok();
+  }
+
+  /* --------------------------- admin (PRO-07/08) ------------------------- */
+  if (path === "/admin/session" && method === "GET") {
+    const denied = requireAdmin();
+    if (denied) return denied;
+    return ok({ id: admin!.id, fullName: admin!.fullName, capabilities: [...ADMIN_CAPABILITIES] });
+  }
+  if (path === "/admin/queues" && method === "GET") {
+    const denied = requireAdmin();
+    if (denied) return denied;
+    const kycQueue = db.verifications
+      .filter((v) => v.status === "PENDING")
+      .map((v) => ({
+        id: `q_${v.id}`,
+        type: "kyc" as const,
+        subjectId: v.userId,
+        title: db.users.find((u) => u.id === v.userId)?.fullName ?? "مستخدم",
+        subtitle: "مستخدم جديد بحاجة لمراجعة",
+        submittedAt: v.submittedAt,
+      }));
+    const propertyQueue = db.properties
+      .filter((p) => p.status === "PENDING")
+      .map((p) => ({
+        id: `q_${p.id}`,
+        type: "property" as const,
+        subjectId: p.id,
+        title: p.title,
+        subtitle: `${p.district} · ${p.rentAmount} ج.م/شهريًا`,
+        submittedAt: p.createdAt,
+      }));
+    const requestQueue = db.tenantRequests
+      .filter((r) => r.status === "PENDING")
+      .map((r) => ({
+        id: `q_${r.id}`,
+        type: "request" as const,
+        subjectId: r.id,
+        title: `طلب سكن في ${r.preferredLocations}`,
+        subtitle: `${r.minBudget}–${r.maxBudget} ج.م`,
+        submittedAt: r.createdAt,
+      }));
+    const reviewQueue = db.reviews
+      .filter((r) => r.status === "PENDING")
+      .map((r) => ({
+        id: `q_${r.id}`,
+        type: "review" as const,
+        subjectId: r.id,
+        title: `تقييم ${r.rating}★`,
+        subtitle: r.comment.slice(0, 60),
+        submittedAt: r.createdAt,
+      }));
+    return ok({ kycQueue, propertyQueue, requestQueue, reviewQueue });
+  }
+  if (seg[0] === "admin" && seg[1] === "kyc" && seg.length === 3 && method === "GET") {
+    const denied = requireAdmin();
+    if (denied) return denied;
+    const v = db.verifications.find((x) => x.userId === seg[2]);
+    if (!v) return err(404, "غير موجود");
+    return ok({
+      userId: v.userId,
+      userName: db.users.find((u) => u.id === v.userId)?.fullName ?? "مستخدم",
+      nationalId: v.nationalId,
+      nationalIdFrontUrl: v.nationalIdFrontUrl,
+      nationalIdBackUrl: v.nationalIdBackUrl,
+      selfieUrl: v.selfieUrl,
+      submittedAt: v.submittedAt,
+    });
+  }
+  if (seg[0] === "admin" && seg[1] === "kyc" && seg[3] === "review" && method === "POST") {
+    const denied = requireAdmin();
+    if (denied) return denied;
+    const v = db.verifications.find((x) => x.userId === seg[2]);
+    // Compare-and-swap on PENDING (requirements.md §2).
+    if (!v || v.status !== "PENDING") return err(409, "تمت مراجعة هذا الطلب بالفعل");
+    const b = body as ReviewDecision;
+    if (b.decision === "reject" && !b.reason?.trim()) return err(400, "سبب الرفض مطلوب");
+    v.status = b.decision === "approve" ? "APPROVED" : "REJECTED";
+    v.rejectionReason = b.decision === "reject" ? b.reason!.trim() : null;
+    v.reviewedBy = admin!.id;
+    v.reviewedAt = new Date().toISOString();
+    if (b.decision === "approve") notify(v.userId, "EKYC_APPROVED", "تم توثيق هويتك", "يمكنك الآن استخدام كل المزايا.");
+    return ok();
+  }
+  if (seg[0] === "admin" && seg[1] === "properties" && seg[3] === "review" && method === "POST") {
+    const denied = requireAdmin();
+    if (denied) return denied;
+    const p = db.properties.find((x) => x.id === seg[2]);
+    if (!p || p.status !== "PENDING") return err(409, "تمت مراجعة هذا الطلب بالفعل");
+    const b = body as ReviewDecision;
+    if (b.decision === "reject" && !b.reason?.trim()) return err(400, "سبب الرفض مطلوب");
+    p.status = b.decision === "approve" ? "APPROVED" : "REJECTED";
+    p.rejectionReason = b.decision === "reject" ? b.reason!.trim() : null;
+    p.approvedBy = admin!.id;
+    p.approvedAt = b.decision === "approve" ? new Date().toISOString() : null;
+    // On approval the backend also embeds the text into ChromaDB (PRO-09).
+    if (b.decision === "approve")
+      notify(p.ownerId, "PROPERTY_APPROVED", "تمت الموافقة على إعلانك", "أصبح إعلانك ظاهرًا للمستأجرين الآن.", `/landlord/properties/${p.id}`);
+    return ok({ status: p.status });
+  }
+  if (seg[0] === "admin" && seg[1] === "requests" && seg[3] === "review" && method === "POST") {
+    const denied = requireAdmin();
+    if (denied) return denied;
+    const r = db.tenantRequests.find((x) => x.id === seg[2]);
+    if (!r || r.status !== "PENDING") return err(409, "تمت مراجعة هذا الطلب بالفعل");
+    const b = body as ReviewDecision;
+    if (b.decision === "reject" && !b.reason?.trim()) return err(400, "سبب الرفض مطلوب");
+    r.status = b.decision === "approve" ? "APPROVED" : "REJECTED";
+    r.rejectionReason = b.decision === "reject" ? b.reason!.trim() : null;
+    r.approvedBy = admin!.id;
+    if (b.decision === "approve") {
+      // Published to verified landlords (SRS 3.2.2).
+      db.users
+        .filter((u) => u.role === "landlord" && isVerified(u.id))
+        .forEach((u) =>
+          notify(u.id, "NEW_TENANT_REQUEST", "طلب سكن جديد", "طلب جديد قد يطابق أحد عقاراتك.", "/landlord/requests"),
+        );
+    }
+    return ok({ status: r.status });
+  }
+  if (seg[0] === "admin" && seg[1] === "reviews" && seg[3] === "review" && method === "POST") {
+    const denied = requireAdmin();
+    if (denied) return denied;
+    const r = db.reviews.find((x) => x.id === seg[2]);
+    if (!r || r.status !== "PENDING") return err(409, "تمت مراجعة هذا الطلب بالفعل");
+    const b = body as ReviewDecision;
+    if (b.decision === "reject" && !b.reason?.trim()) return err(400, "سبب الرفض مطلوب");
+    r.status = b.decision === "approve" ? "APPROVED" : "REJECTED";
+    r.reviewedBy = admin!.id;
+    if (b.decision === "approve")
+      notify(r.reviewerId, "REVIEW_APPROVED", "تم نشر تقييمك", "أصبح تقييمك ظاهرًا على صفحة العقار.");
+    return ok({ status: r.status });
+  }
   if (path === "/admin/stats" && method === "GET") {
-    if (!admin) return err(403, "غير مسموح");
-    if (!can("report:export")) return err(403, "لا تملك صلاحية عرض التقارير");
-    // Blend seeded demo figures with any real payments made this session.
-    const successful = db.payments.filter((p) => p.status === "success");
-    const liveRevenue = successful.reduce((s, p) => s + p.amountEgp, 0);
+    const denied = requireAdmin();
+    if (denied) return denied;
+    const successful = db.payments.filter((p) => p.status === "SUCCESS");
+    const live = successful.reduce((s, p) => s + p.amount, 0);
     const monthly = [
-      { month: "يناير", revenue: 3200, transactions: 24 },
       { month: "فبراير", revenue: 4100, transactions: 31 },
       { month: "مارس", revenue: 3800, transactions: 28 },
       { month: "أبريل", revenue: 5200, transactions: 39 },
       { month: "مايو", revenue: 6100, transactions: 44 },
-      { month: "يونيو", revenue: 5400 + liveRevenue, transactions: 41 + successful.length },
+      { month: "يونيو", revenue: 5400, transactions: 41 },
+      { month: "يوليو", revenue: 3200 + live, transactions: 22 + successful.length },
     ];
-    const approved = db.properties.filter((p) => p.status === "approved").length;
-    const pending = db.properties.filter((p) => p.status === "pending").length;
-    const rejected = db.properties.filter((p) => p.status === "rejected").length;
+    const pendingModeration =
+      db.properties.filter((p) => p.status === "PENDING").length +
+      db.verifications.filter((v) => v.status === "PENDING").length +
+      db.tenantRequests.filter((r) => r.status === "PENDING").length +
+      db.reviews.filter((r) => r.status === "PENDING").length;
     return ok({
       summary: {
         totalRevenue: monthly.reduce((s, m) => s + m.revenue, 0),
         totalTransactions: monthly.reduce((s, m) => s + m.transactions, 0),
-        activeListings: approved,
-        pendingReviews: pending,
+        activeListings: db.properties.filter((p) => p.status === "APPROVED").length,
+        pendingModeration,
       },
       monthlyRevenue: monthly,
-      reviewDistribution: [
-        { label: "تمت الموافقة", value: approved },
-        { label: "قيد المراجعة", value: pending },
-        { label: "مرفوض", value: rejected },
+      moderationDistribution: [
+        { label: "تمت الموافقة", value: db.properties.filter((p) => p.status === "APPROVED").length },
+        { label: "قيد المراجعة", value: db.properties.filter((p) => p.status === "PENDING").length },
+        { label: "مرفوض", value: db.properties.filter((p) => p.status === "REJECTED").length },
       ],
     });
   }
-  if (path === "/admin/queues" && method === "GET") {
-    if (!admin) return err(403, "غير مسموح");
-    liveQueueTick++;
-    if (liveQueueTick % 4 === 0) {
-      const landlord = db.users.find((u) => u.id === "usr_landlord2");
-      if (landlord) {
-        const hoods = ["توريل", "حي الجامعة", "المشاية", "جديلة", "قولنجيل"];
-        db.properties.push({
-          ...db.properties[0],
-          id: nextId("prop"),
-          ownerId: landlord.id,
-          title: `شقة جديدة في ${hoods[liveQueueTick % hoods.length]}`,
-          neighborhood: hoods[liveQueueTick % hoods.length],
-          monthlyRent: 2500 + Math.floor(Math.random() * 8) * 500,
-          status: "pending",
-          boosted: false,
-          coverImage: null,
-          inquiriesCount: 0,
-          createdAt: new Date().toISOString(),
-        });
-      }
-    }
-    const propertyQueue = db.properties
-      .filter((p) => p.status === "pending")
-      .map((p) => ({ id: `q_${p.id}`, type: "property" as const, subjectId: p.id, title: p.title, subtitle: `${p.neighborhood} · ${p.monthlyRent} ج.م/شهريًا`, submittedAt: p.createdAt }))
-      .sort((a, b) => b.submittedAt.localeCompare(a.submittedAt));
-    const kycQueue = db.kycSubmissions
-      .filter((s) => !s.reviewed)
-      .map((s) => {
-        const u = db.users.find((x) => x.id === s.userId);
-        return { id: `q_kyc_${s.userId}`, type: "kyc" as const, subjectId: s.userId, title: u?.fullName ?? "مستخدم", subtitle: "مستخدم جديد بحاجة لمراجعة", submittedAt: s.submittedAt };
-      })
-      .sort((a, b) => b.submittedAt.localeCompare(a.submittedAt));
-    return ok({ propertyQueue, kycQueue });
-  }
-  if (seg[0] === "admin" && seg[1] === "properties" && seg[3] === "review" && method === "POST") {
-    if (!admin) return err(403, "غير مسموح");
-    const b = body as ReviewDecision;
-    if (!can(b.decision === "approve" ? "listing:approve" : "listing:reject"))
-      return err(403, "لا تملك صلاحية مراجعة العقارات");
-    const property = db.properties.find((p) => p.id === seg[2]);
-    if (!property) return err(404, "غير موجود");
-    if (property.status !== "pending") return err(409, "تمت مراجعة هذا الطلب بالفعل");
-    property.status = b.decision === "approve" ? "approved" : "rejected";
-    property.rejectionReason = b.decision === "reject" ? (b.reason ?? null) : null;
-    pushAudit(admin, `listing:${b.decision}`, property.id);
-    return ok({ ok: true, status: property.status });
-  }
-  if (seg[0] === "admin" && seg[1] === "kyc" && seg.length === 3 && method === "GET") {
-    if (!admin) return err(403, "غير مسموح");
-    const u = db.users.find((x) => x.id === seg[2]);
-    if (!u) return err(404, "غير موجود");
-    const submission = db.kycSubmissions.find((s) => s.userId === u.id && !s.reviewed);
-    return ok({
-      userId: u.id,
-      userName: u.fullName,
-      documents: u.kyc.completedSteps.map((type) => ({
-        type,
-        label: verificationDocumentLabels[type],
-        uploadedAt: submission?.submittedAt ?? u.createdAt,
-      })),
-      submittedAt: submission?.submittedAt ?? u.createdAt,
-    });
-  }
-  if (seg[0] === "admin" && seg[1] === "kyc" && seg[3] === "review" && method === "POST") {
-    if (!admin) return err(403, "غير مسموح");
-    if (!can("kyc:review")) return err(403, "لا تملك صلاحية مراجعة التوثيق");
-    const u = db.users.find((x) => x.id === seg[2]);
-    const submission = db.kycSubmissions.find((s) => s.userId === seg[2] && !s.reviewed);
-    if (!u || !submission) return err(409, "تمت مراجعة هذا الطلب بالفعل");
-    const b = body as ReviewDecision;
-    const rejectionReason = b.reason?.trim();
-    if (b.decision === "reject" && !rejectionReason) return err(400, "سبب الرفض مطلوب");
-    if (b.decision === "approve") {
-      u.verificationStatus = "verified";
-      u.kyc.verifiedAt = new Date().toISOString();
-      u.verificationRejectedAt = null;
-      u.verificationResubmitAfter = null;
-      u.verificationRejectionReason = null;
-      db.properties
-        .filter((p) => p.ownerId === u.id && p.status === "draft")
-        .forEach((p) => {
-          p.ownerVerified = true;
-          if (!u.quotas.freeListingUsed) {
-            p.status = "pending";
-            u.quotas.freeListingUsed = true;
-          }
-        });
-    } else {
-      const rejectedAt = new Date();
-      u.verificationStatus = "rejected";
-      u.verificationRejectedAt = rejectedAt.toISOString();
-      u.verificationResubmitAfter = new Date(rejectedAt.getTime() + VERIFICATION_COOLDOWN_MS).toISOString();
-      u.verificationRejectionReason = rejectionReason;
-      u.kyc.completedSteps = [];
-    }
-    submission.reviewed = true;
-    pushAudit(admin, `verification:${b.decision}`, u.id);
-    return ok();
-  }
 
-  // ---- customer support: user side (AI-first, escalate to human) ----
-  if (path === "/support/thread" && method === "GET") {
-    if (!user) return unauth();
-    const ticket = latestTicketFor(user.id);
-    return ok(threadView(ticket));
-  }
-  if (path === "/support/message" && method === "POST") {
-    if (!user) return unauth();
-    const { message } = body as SupportSendRequest;
-    let ticket = openTicketFor(user.id);
-    if (!ticket) {
-      ticket = {
-        id: nextId("tkt"),
-        userId: user.id,
-        subject: message.slice(0, 40),
-        status: "new",
-        assignedAdminId: null,
-        escalated: false,
-        messages: [],
-        createdAt: new Date().toISOString(),
-        lastMessageAt: new Date().toISOString(),
-      };
-      db.tickets.push(ticket);
-    }
-    pushMsg(ticket, "user", user.fullName, message);
-    // If a human is already handling it, don't auto-reply with the AI.
-    if (!ticket.escalated) {
-      pushMsg(ticket, "ai", "المساعد الآلي", aiSupportReply(message));
-    }
-    return ok(threadView(ticket));
-  }
-  if (path === "/support/escalate" && method === "POST") {
-    if (!user) return unauth();
-    const ticket = openTicketFor(user.id);
-    if (!ticket) return err(404, "لا توجد محادثة مفتوحة");
-    ticket.escalated = true;
-    if (ticket.status === "closed") ticket.status = "new";
-    pushMsg(ticket, "ai", "المساعد الآلي", "تم تحويلك إلى أحد موظفي الدعم، وسيتم الرد عليك في أقرب وقت.");
-    return ok(threadView(ticket));
-  }
-
-  // ---- customer support: admin side ----
-  if (path === "/admin/tickets" && method === "GET") {
-    if (!admin) return err(403, "غير مسموح");
-    if (!can("ticket:reply")) return err(403, "لا تملك صلاحية إدارة الدعم");
-    const items = [...db.tickets]
-      .sort((a, b) => b.lastMessageAt.localeCompare(a.lastMessageAt))
-      .map(ticketSummary);
-    return ok({ items });
-  }
-  if (seg[0] === "admin" && seg[1] === "tickets" && seg.length === 3 && method === "GET") {
-    if (!admin) return err(403, "غير مسموح");
-    if (!can("ticket:reply")) return err(403, "لا تملك صلاحية إدارة الدعم");
-    const ticket = db.tickets.find((t) => t.id === seg[2]);
-    if (!ticket) return err(404, "غير موجود");
-    return ok(ticketDetail(ticket));
-  }
-  if (seg[0] === "admin" && seg[1] === "tickets" && seg[3] === "reply" && method === "POST") {
-    if (!admin) return err(403, "غير مسموح");
-    if (!can("ticket:reply")) return err(403, "لا تملك صلاحية إدارة الدعم");
-    const ticket = db.tickets.find((t) => t.id === seg[2]);
-    if (!ticket) return err(404, "غير موجود");
-    const b = body as AdminReplyRequest;
-    pushMsg(ticket, "admin", admin.fullName, b.content, b.internal);
-    if (!b.internal) {
-      ticket.escalated = true;
-      if (!ticket.assignedAdminId) ticket.assignedAdminId = admin.id;
-      if (ticket.status === "new" || ticket.status === "assigned") ticket.status = "in_progress";
-    }
-    pushAudit(admin, b.internal ? "ticket:note" : "ticket:reply", ticket.id);
-    return ok(ticketDetail(ticket));
-  }
-  if (seg[0] === "admin" && seg[1] === "tickets" && seg[3] === "assign" && method === "POST") {
-    if (!admin) return err(403, "غير مسموح");
-    if (!can("ticket:reply")) return err(403, "لا تملك صلاحية إدارة الدعم");
-    const ticket = db.tickets.find((t) => t.id === seg[2]);
-    if (!ticket) return err(404, "غير موجود");
-    ticket.assignedAdminId = admin.id;
-    if (ticket.status === "new") ticket.status = "assigned";
-    pushAudit(admin, "ticket:assign", ticket.id);
-    return ok(ticketDetail(ticket));
-  }
-  if (seg[0] === "admin" && seg[1] === "tickets" && seg[3] === "status" && method === "POST") {
-    if (!admin) return err(403, "غير مسموح");
-    if (!can("ticket:reply")) return err(403, "لا تملك صلاحية إدارة الدعم");
-    const ticket = db.tickets.find((t) => t.id === seg[2]);
-    if (!ticket) return err(404, "غير موجود");
-    const b = body as TicketStatusUpdate;
-    ticket.status = b.status;
-    pushAudit(admin, `ticket:status:${b.status}`, ticket.id);
-    return ok(ticketDetail(ticket));
-  }
-
-  // ---- admin & RBAC management ----
-  if (path === "/admin/team" && method === "GET") {
-    if (!admin) return err(403, "غير مسموح");
-    if (!can("admin:manage")) return err(403, "لا تملك صلاحية إدارة المشرفين");
-    const items = db.users.filter((u) => u.role === "admin").map(teamMember);
-    return ok({ items });
-  }
-  if (path === "/admin/team" && method === "POST") {
-    if (!admin) return err(403, "غير مسموح");
-    if (!can("admin:create")) return err(403, "لا تملك صلاحية إنشاء مشرفين");
-    const b = body as CreateAdminRequest;
-    if (db.users.some((u) => u.email === b.email)) return err(409, "هذا البريد مسجّل بالفعل");
-    const created: MockUser = {
-      id: nextId("usr"),
-      fullName: b.fullName,
-      email: b.email,
-      phone: "01000000000",
-      role: "admin",
-      verificationStatus: "verified",
-      verificationRejectedAt: null,
-      verificationResubmitAfter: null,
-      verificationRejectionReason: null,
-      createdAt: new Date().toISOString(),
-      kyc: { completedSteps: [], verifiedAt: new Date().toISOString() },
-      quotas: { matchUsed: 0, matchLimit: 3, optimizerUsed: 0, optimizerLimit: 2, freeListingUsed: false },
-      adminRole: b.role,
-      capabilities: ROLE_CAPABILITIES[b.role],
-      disabled: false,
-      lastLoginAt: null,
-    };
-    db.users.push(created);
-    pushAudit(admin, "admin:create", created.id);
-    return ok(teamMember(created));
-  }
-  if (seg[0] === "admin" && seg[1] === "team" && seg.length === 3 && method === "PATCH") {
-    if (!admin) return err(403, "غير مسموح");
-    if (!can("admin:manage")) return err(403, "لا تملك صلاحية إدارة المشرفين");
-    const target = db.users.find((u) => u.id === seg[2] && u.role === "admin");
-    if (!target) return err(404, "غير موجود");
-    const b = body as UpdateAdminRequest;
-    if (b.role) {
-      target.adminRole = b.role;
-      target.capabilities = ROLE_CAPABILITIES[b.role];
-    }
-    if (typeof b.disabled === "boolean") target.disabled = b.disabled;
-    pushAudit(admin, "admin:update", target.id);
-    return ok(teamMember(target));
-  }
-  if (seg[0] === "admin" && seg[1] === "team" && seg[3] === "reset-password" && method === "POST") {
-    if (!admin) return err(403, "غير مسموح");
-    if (!can("admin:manage")) return err(403, "لا تملك صلاحية إدارة المشرفين");
-    const target = db.users.find((u) => u.id === seg[2] && u.role === "admin");
-    if (!target) return err(404, "غير موجود");
-    pushAudit(admin, "admin:reset-password", target.id);
-    return ok({ sent: true });
-  }
-  if (path === "/admin/audit-log" && method === "GET") {
-    if (!admin) return err(403, "غير مسموح");
-    if (!can("admin:manage")) return err(403, "لا تملك صلاحية الاطلاع على السجل");
-    return ok({ items: db.auditLog.slice(0, 50) });
-  }
-  if (path === "/admin/login-history" && method === "GET") {
-    if (!admin) return err(403, "غير مسموح");
-    if (!can("admin:manage")) return err(403, "لا تملك صلاحية الاطلاع على السجل");
-    return ok({ items: db.loginHistory });
-  }
-
-  // ---- legal chat ----
+  /* -------------------------- legal chat (PRO-17) ------------------------ */
   if (path === "/legal-chat" && method === "POST") {
     if (!user) return unauth();
     const { message } = body as ChatRequest;
     const onTopic = LEGAL_KEYWORDS.some((k) => message.includes(k));
-    if (!onTopic) return ok({ id: nextId("msg"), role: "assistant", content: "أقدر أساعدك فقط في أسئلة الإيجار والقانون العقاري في مصر.", declined: true });
+    if (!onTopic) {
+      return ok({
+        id: nextId("msg"),
+        role: "assistant",
+        content: "أقدر أساعدك فقط في أسئلة الإيجار والقانون العقاري في مصر.",
+        declined: true,
+      });
+    }
     return ok({
       id: nextId("msg"),
       role: "assistant",

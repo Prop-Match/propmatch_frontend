@@ -57,11 +57,30 @@ export function AdminUserReview({ userId }: { userId: string }) {
 
         <dl className="flex flex-col gap-3 border-t border-hairline pt-4 text-body">
           <Row label="المستخدم" value={data.userName} />
+          {/* The only screen that may show the full national ID (rbac.md). */}
+          <Row label="الرقم القومي" value={data.nationalId} ltr />
           <Row label="تاريخ الإرسال" value={formatDate(data.submittedAt)} />
-          {data.documents.map((doc) => (
-            <Row key={doc.type} label={doc.label} value={formatDate(doc.uploadedAt)} />
-          ))}
         </dl>
+
+        {/* ID images: reviewed here only, never sent to any AI/LLM and never
+            stored in the vector DB (build prompt §6). */}
+        <div className="grid grid-cols-3 gap-2">
+          {[
+            { label: "وجه البطاقة الأمامي", url: data.nationalIdFrontUrl },
+            { label: "وجه البطاقة الخلفي", url: data.nationalIdBackUrl },
+            { label: "صورة شخصية", url: data.selfieUrl },
+          ].map(({ label, url }) => (
+            <figure key={label} className="flex flex-col gap-1">
+              {/* eslint-disable-next-line @next/next/no-img-element -- signed, short-lived KYC asset URLs; not routed through next/image */}
+              <img
+                src={url}
+                alt={label}
+                className="h-24 w-full rounded-control border border-hairline object-cover"
+              />
+              <figcaption className="text-caption text-muted">{label}</figcaption>
+            </figure>
+          ))}
+        </div>
 
         <OwnershipDisclaimer />
 

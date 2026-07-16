@@ -14,7 +14,7 @@ describe("auth contracts", () => {
   const base = {
     fullName: "سارة أحمد",
     email: "sara@example.com",
-    phone: "01012345678",
+    phoneNumber: "01012345678",
     password: "12345678",
   };
 

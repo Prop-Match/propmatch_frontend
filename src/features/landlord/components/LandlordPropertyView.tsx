@@ -23,17 +23,17 @@ export function LandlordPropertyView({ id }: { id: string }) {
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-card border border-hairline bg-surface p-4">
           <div className="flex items-center gap-2">
             <StatusChip status={p.status} />
-            {p.status === "rejected" && p.rejectionReason && (
+            {p.status === "REJECTED" && p.rejectionReason && (
               <span className="text-small text-error">سبب الرفض: {p.rejectionReason}</span>
             )}
           </div>
-          {p.status === "approved" && !p.boosted && (
+          {p.status === "APPROVED" && !p.isBoosted && (
             <Button size="sm" onClick={() => setBoostOpen(true)}>
               <TrendingUp className="size-4" aria-hidden />
               تمييز الإعلان
             </Button>
           )}
-          {p.boosted && (
+          {p.isBoosted && (
             <span className="rounded-pill bg-pending-tint px-3 py-1 text-caption font-bold text-pending">إعلان مميّز</span>
           )}
         </div>
@@ -44,7 +44,7 @@ export function LandlordPropertyView({ id }: { id: string }) {
       <PaymentSheet
         open={boostOpen}
         onClose={() => setBoostOpen(false)}
-        context="boost"
+        paymentType="BOOST_LISTING"
         propertyId={id}
         onActivated={() => {
           toast("success", "تم تمييز إعلانك");

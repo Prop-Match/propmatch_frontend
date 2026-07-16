@@ -2,47 +2,53 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { FileText, CreditCard, MapPinned, Loader2, BadgeCheck, ShieldAlert, ArrowLeft, XCircle } from "lucide-react";
-import { useKycState, useKycUpload, useKycSubmit } from "../hooks/useKyc";
+import { ScanLine, CreditCard, ScanFace, Loader2, BadgeCheck, XCircle, ArrowLeft } from "lucide-react";
+import { useVerificationState, useUploadDocument, useSubmitVerification } from "../hooks/useKyc";
 import { UploadTile } from "./UploadTile";
 import { OwnershipDisclaimer } from "@/src/components/ui/VerifiedBadge";
 import { Button } from "@/src/components/ui/Button";
+import { InputField } from "@/src/components/ui/Field";
 import { Skeleton } from "@/src/components/ui/Skeleton";
-import { formatDate } from "@/src/utils/format";
-import type { KycStep } from "@/src/lib/api/contracts/verification";
+import { maskNationalId } from "@/src/utils/format";
+import { kycDocumentLabels, type KycDocument } from "@/src/lib/api/contracts/verification";
 
-const stepConfig: { step: KycStep; title: string; hint: string; Icon: typeof FileText }[] = [
-  { step: "license", title: "الرخصة أو السجل التجاري", hint: "ارفع مستند النشاط أو الترخيص القانوني إن وجد", Icon: FileText },
-  { step: "government_id", title: "بطاقة الهوية", hint: "ارفع صورة واضحة لبطاقة الرقم القومي", Icon: CreditCard },
-  { step: "proof_of_address", title: "إثبات العنوان", hint: "ارفع إيصال مرافق أو مستند يثبت عنوانك", Icon: MapPinned },
+/** PRO-03: National ID front → back → selfie, then submit → PENDING. */
+const stepConfig: { document: KycDocument; hint: string; Icon: typeof ScanLine }[] = [
+  { document: "national_id_front", hint: "صوّر وجه البطاقة الأمامي بوضوح", Icon: ScanLine },
+  { document: "national_id_back", hint: "صوّر وجه البطاقة الخلفي", Icon: CreditCard },
+  { document: "selfie", hint: "التقط صورة شخصية للتحقق", Icon: ScanFace },
 ];
 
 export function KycWizard() {
   const router = useRouter();
-  const { data: state, isLoading } = useKycState();
-  const upload = useKycUpload();
-  const submit = useKycSubmit();
-  const [activeStep, setActiveStep] = useState<KycStep | null>(null);
-  const [renderedAt] = useState(() => Date.now());
+  const { data: state, isLoading } = useVerificationState();
+  const upload = useUploadDocument();
+  const submit = useSubmitVerification();
+  const [active, setActive] = useState<KycDocument | null>(null);
+  const [captured, setCaptured] = useState<KycDocument[]>([]);
+  const [nationalId, setNationalId] = useState("");
 
   if (isLoading || !state) return <Skeleton className="h-96 w-full" />;
 
-  // Terminal states
-  if (state.status === "verified") {
+  if (state.status === "APPROVED") {
     return (
       <ResultCard
         tone="success"
         Icon={BadgeCheck}
-        title="تمت الموافقة على التوثيق"
+        title="تم توثيق هويتك"
         body={
           <div className="flex flex-col gap-1 text-body text-body-text">
-            <p>يمكنك الآن إنشاء ونشر عدد غير محدود من الإعلانات بدون إعادة التوثيق.</p>
-            {state.verifiedAt && <p>تاريخ الموافقة: <b className="text-ink">{formatDate(state.verifiedAt)}</b></p>}
+            <p>يمكنك الآن نشر إعلاناتك وطلباتك والتواصل بعد قبول العروض.</p>
+            {state.nationalIdLast4 && (
+              <p>
+                الرقم القومي: <b className="text-ink" dir="ltr">{maskNationalId(state.nationalIdLast4)}</b>
+              </p>
+            )}
           </div>
         }
         action={
           <Button onClick={() => router.push("/landlord")}>
-            المتابعة إلى لوحة التحكم
+            المتابعة
             <ArrowLeft className="size-4" aria-hidden />
           </Button>
         }
@@ -50,106 +56,95 @@ export function KycWizard() {
     );
   }
 
-  if (state.status === "rejected") {
-    const cooldownActive = Boolean(state.resubmitAfter && new Date(state.resubmitAfter).getTime() > renderedAt);
-    if (cooldownActive) {
-      return (
-        <ResultCard
-          tone="error"
-          Icon={XCircle}
-          title="تم رفض طلب التوثيق"
-          body={
-            <div className="flex flex-col gap-2 text-body text-body-text">
-              {state.rejectionReason && <p>سبب الرفض: <b className="text-ink">{state.rejectionReason}</b></p>}
-              {state.resubmitAfter && <p>يمكنك إعادة الإرسال بعد {formatDate(state.resubmitAfter)}.</p>}
-            </div>
-          }
-          action={<Button variant="secondary" onClick={() => router.push("/landlord")}>العودة للوحة التحكم</Button>}
-        />
-      );
-    }
-  }
-
-  if (state.status === "pending_review") {
+  if (state.status === "PENDING") {
     return (
       <ResultCard
         tone="pending"
         Icon={Loader2}
         spin
         title="طلب التوثيق قيد المراجعة"
-        body={<p className="text-body text-body-text">استلمنا مستنداتك، ولا يمكنك إرسال طلب آخر حتى يراجعها فريق الإدارة.</p>}
-        action={<Button variant="secondary" onClick={() => router.push("/landlord")}>العودة للوحة التحكم</Button>}
+        body={
+          <p className="text-body text-body-text">
+            استلمنا مستنداتك وسيراجعها فريق الإدارة قريبًا. لا يمكنك إرسال طلب آخر أثناء المراجعة.
+          </p>
+        }
+        action={<Button variant="secondary" onClick={() => router.push("/landlord")}>العودة</Button>}
       />
     );
   }
 
-  const allDone = state.completedSteps.length === 3;
-
-  function capture(step: KycStep, bad = false) {
-    setActiveStep(step);
-    upload.mutate({ step, simulateBadQuality: bad }, { onSettled: () => setActiveStep(null) });
-  }
-
+  const allCaptured = stepConfig.every((s) => captured.includes(s.document));
   const lastReason = upload.data && !upload.data.accepted ? upload.data.reason : null;
+
+  function capture(document: KycDocument, simulateUnreadable = false) {
+    setActive(document);
+    upload.mutate(
+      { document, simulateUnreadable },
+      {
+        onSuccess: (res) => {
+          if (res.accepted) setCaptured((c) => (c.includes(document) ? c : [...c, document]));
+        },
+        onSettled: () => setActive(null),
+      },
+    );
+  }
 
   return (
     <div className="mx-auto flex max-w-xl flex-col gap-5">
       <div>
-        <h1 className="text-h1 font-bold text-ink">توثيق مستندات المالك</h1>
+        <h1 className="text-h1 font-bold text-ink">توثيق الهوية</h1>
         <p className="mt-1 text-small text-muted">
-          التوثيق مطلوب مرة واحدة فقط قبل نشر الإعلانات، وبعد الموافقة يمكنك إنشاء إعلانات بدون إعادة التوثيق.
+          التوثيق مطلوب مرة واحدة قبل نشر إعلان أو طلب، وقبل قبول العروض.
         </p>
       </div>
 
       <OwnershipDisclaimer />
 
-      {state.status === "rejected" && state.rejectionReason && (
+      {/* REJECTED → the user fixes what the admin flagged and resubmits. */}
+      {state.rejectionReason && (
         <div className="flex items-start gap-3 rounded-card border border-error/30 bg-error-tint px-4 py-3">
           <XCircle className="mt-0.5 size-5 shrink-0 text-error" aria-hidden />
           <div>
             <p className="text-small font-bold text-error">تم رفض الطلب السابق</p>
-            <p className="text-caption text-body-text">سبب الرفض: {state.rejectionReason}</p>
+            <p className="text-caption text-body-text">{state.rejectionReason}</p>
           </div>
-        </div>
-      )}
-
-      {!state.hasListingIntent && (
-        <div className="flex items-start gap-3 rounded-card border border-pending/30 bg-pending-tint px-4 py-3">
-          <ShieldAlert className="mt-0.5 size-5 shrink-0 text-pending" aria-hidden />
-          <div className="flex-1">
-            <p className="text-small font-bold text-pending">ابدأ بإضافة مسودة إعلان أولًا</p>
-            <p className="text-caption text-body-text">التوثيق متاح فقط للمستخدمين الذين بدأوا إضافة عقار داخل المنصة.</p>
-          </div>
-          <Button size="sm" variant="secondary" onClick={() => router.push("/landlord/properties/new")}>
-            إضافة عقار
-          </Button>
         </div>
       )}
 
       <div className="flex flex-col gap-3">
-        {stepConfig.map(({ step, title, hint, Icon }) => {
-          const done = state.completedSteps.includes(step);
-          const isUploading = activeStep === step && upload.isPending;
-          const isBad = !done && upload.variables?.step === step && upload.data?.accepted === false;
+        {stepConfig.map(({ document, hint, Icon }) => {
+          const done = captured.includes(document);
+          const isUploading = active === document && upload.isPending;
+          const isBad = !done && upload.variables?.document === document && upload.data?.accepted === false;
           return (
             <UploadTile
-              key={step}
-              title={title}
+              key={document}
+              title={kycDocumentLabels[document]}
               hint={hint}
               Icon={Icon}
               reason={isBad ? lastReason : undefined}
               state={done ? "captured" : isUploading ? "uploading" : isBad ? "bad-quality" : "empty"}
-              onCapture={() => capture(step)}
+              onCapture={() => capture(document)}
             />
           );
         })}
       </div>
 
-      {/* Dev-only: simulate an invalid document to exercise rejection-style upload errors. */}
+      <InputField
+        label="الرقم القومي"
+        inputMode="numeric"
+        dir="ltr"
+        placeholder="14 رقمًا"
+        value={nationalId}
+        onChange={(e) => setNationalId(e.target.value)}
+        hint="يُستخدم للتحقق فقط، ويظهر مخفيًا في كل مكان عدا العقد."
+      />
+
+      {/* Dev-only: exercise the unreadable-document path. */}
       {process.env.NODE_ENV !== "production" && (
         <button
           type="button"
-          onClick={() => capture("government_id", true)}
+          onClick={() => capture("national_id_front", true)}
           className="text-caption text-muted underline hover:text-body-text"
         >
           محاكاة مستند غير واضح (للتجربة)
@@ -158,9 +153,9 @@ export function KycWizard() {
 
       <Button
         size="lg"
-        disabled={!allDone || !state.canSubmit}
+        disabled={!allCaptured || !state.canSubmit || !/^\d{14}$/.test(nationalId)}
         loading={submit.isPending}
-        onClick={() => submit.mutate(undefined, { onSuccess: () => undefined })}
+        onClick={() => submit.mutate(nationalId)}
       >
         إرسال للمراجعة
       </Button>

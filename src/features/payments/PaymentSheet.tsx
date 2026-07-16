@@ -8,10 +8,10 @@ import { InputField } from "@/src/components/ui/Field";
 import { api } from "@/src/lib/api/browserClient";
 import { formatEGP } from "@/src/utils/format";
 import {
-  paymentContextLabels,
+  paymentTypeLabels,
   type CheckoutSession,
-  type PaymentContext,
-  type PaymentResult,
+  type PaymentTransaction,
+  type PaymentType,
 } from "@/src/lib/api/contracts/payment";
 
 type Phase = "form" | "processing" | "success" | "error";
@@ -19,19 +19,22 @@ type Phase = "form" | "processing" | "success" | "error";
 export interface PaymentSheetProps {
   open: boolean;
   onClose: () => void;
-  context: PaymentContext;
+  paymentType: PaymentType;
+  /** For NEW_LISTING / BOOST_LISTING. */
   propertyId?: string;
-  /** Called once the entitlement is confirmed active (post-webhook). */
+  /** Fired once the webhook-credited entitlement is confirmed. */
   onActivated?: () => void;
 }
 
 /**
- * Reusable Paymob payment surface (design spec §4.3): bottom sheet on
- * mobile/tablet, centered modal on desktop; states form → processing →
- * success → error. Success means "payment captured" — we then poll the
- * entitlement until it's actually active (ASSUMPTIONS.md #8, webhook race).
+ * Paymob payment surface (PRO-14): bottom sheet on mobile, modal on desktop.
+ *
+ * A client-side success means the payment was **captured**, not that the quota
+ * was **credited** — the webhook does that. So we poll the transaction after
+ * success rather than trusting our own state (ASSUMPTIONS.md #17). In the real
+ * build the form below is replaced by the Paymob iframe (`iframeUrl`).
  */
-export function PaymentSheet({ open, onClose, context, propertyId, onActivated }: PaymentSheetProps) {
+export function PaymentSheet({ open, onClose, paymentType, propertyId, onActivated }: PaymentSheetProps) {
   const [phase, setPhase] = useState<Phase>("form");
   const [cardNumber, setCardNumber] = useState("");
   const [session, setSession] = useState<CheckoutSession | null>(null);
@@ -41,20 +44,18 @@ export function PaymentSheet({ open, onClose, context, propertyId, onActivated }
     setPhase("processing");
     try {
       const checkout =
-        session ??
-        (await api.post<CheckoutSession>("payments/checkout", { context, propertyId }));
+        session ?? (await api.post<CheckoutSession>("payments/checkout", { paymentType, propertyId }));
       setSession(checkout);
-      const result = await api.post<PaymentResult>(`payments/${checkout.checkoutId}/confirm`, {
+      const result = await api.post<{ status: string }>(`payments/${checkout.paymobOrderId}/confirm`, {
         cardNumber: cardNumber.replace(/\s/g, ""),
       });
-      if (result.status === "failed") {
+      if (result.status === "FAILED") {
         setPhase("error");
         return;
       }
       setPhase("success");
-      // Poll for entitlement activation (webhook lands shortly after).
       setActivating(true);
-      await pollEntitlement(checkout.checkoutId);
+      await pollSettled(checkout.paymobOrderId);
       setActivating(false);
       onActivated?.();
     } catch {
@@ -62,10 +63,11 @@ export function PaymentSheet({ open, onClose, context, propertyId, onActivated }
     }
   }
 
-  async function pollEntitlement(checkoutId: string) {
+  /** Wait for the (simulated) webhook to mark the transaction settled. */
+  async function pollSettled(paymobOrderId: string) {
     for (let i = 0; i < 12; i++) {
-      const status = await api.get<PaymentResult>(`payments/${checkoutId}`);
-      if (status.entitlementActive) return;
+      const tx = await api.get<PaymentTransaction>(`payments/${paymobOrderId}`);
+      if (tx.status === "SUCCESS" && tx.paidAt) return;
       await new Promise((r) => setTimeout(r, 800));
     }
   }
@@ -82,9 +84,9 @@ export function PaymentSheet({ open, onClose, context, propertyId, onActivated }
       {phase === "form" && (
         <div className="flex flex-col gap-4">
           <div className="flex items-center justify-between rounded-control bg-primary-tint px-4 py-3">
-            <span className="text-small font-semibold text-primary-dark">{paymentContextLabels[context]}</span>
+            <span className="text-small font-semibold text-primary-dark">{paymentTypeLabels[paymentType]}</span>
             <span className="text-title font-bold text-primary">
-              {formatEGP(context === "listing" ? 100 : context === "boost" ? 75 : 30)}
+              {formatEGP(session?.amount ?? { NEW_LISTING: 100, BOOST_LISTING: 75, REFILL_MATCHES: 30, OFFER_PACK: 50 }[paymentType])}
             </span>
           </div>
           <InputField
@@ -100,7 +102,7 @@ export function PaymentSheet({ open, onClose, context, propertyId, onActivated }
           </div>
           <p className="flex items-center gap-1.5 text-caption text-muted">
             <ShieldCheck className="size-3.5" aria-hidden />
-            دفع آمن ومباشر بالجنيه المصري — بدون محافظ أو نقاط.
+            دفع آمن ومباشر بالجنيه المصري.
           </p>
           <Button size="lg" block onClick={pay} disabled={cardNumber.replace(/\s/g, "").length < 12}>
             <CreditCard className="size-4" aria-hidden />
@@ -120,9 +122,7 @@ export function PaymentSheet({ open, onClose, context, propertyId, onActivated }
         <div className="flex flex-col items-center gap-3 py-6 text-center">
           <CheckCircle2 className="size-12 text-success" aria-hidden />
           <p className="text-title font-bold text-ink">تم الدفع بنجاح</p>
-          <p className="text-small text-muted">
-            {activating ? "جارٍ تفعيل خدمتك…" : "تم تفعيل خدمتك."}
-          </p>
+          <p className="text-small text-muted">{activating ? "جارٍ تحديث رصيدك…" : "تم تحديث رصيدك."}</p>
           <Button block onClick={reset} disabled={activating} loading={activating}>
             {activating ? "لحظات…" : "تم"}
           </Button>

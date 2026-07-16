@@ -2,29 +2,34 @@
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/src/lib/api/browserClient";
-import type { KycState, KycStep, KycUploadResponse } from "@/src/lib/api/contracts/verification";
+import type {
+  KycDocument,
+  KycUploadResponse,
+  VerificationState,
+} from "@/src/lib/api/contracts/verification";
 
-const KEY = ["kyc", "state"] as const;
+const KEY = ["verification"] as const;
 
-export function useKycState() {
-  return useQuery({ queryKey: KEY, queryFn: () => api.get<KycState>("kyc/state") });
+export function useVerificationState() {
+  return useQuery({ queryKey: KEY, queryFn: () => api.get<VerificationState>("verification") });
 }
 
-export function useKycUpload() {
+export function useUploadDocument() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (vars: { step: KycStep; simulateBadQuality?: boolean }) =>
-      api.post<KycUploadResponse>("kyc/upload", vars),
+    mutationFn: (vars: { document: KycDocument; simulateUnreadable?: boolean }) =>
+      api.post<KycUploadResponse>("verification/upload", vars),
     onSuccess: () => qc.invalidateQueries({ queryKey: KEY }),
   });
 }
 
-export function useKycSubmit() {
+export function useSubmitVerification() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: () => api.post<{ ok: boolean }>("kyc/submit"),
+    mutationFn: (nationalId: string) => api.post<{ ok: boolean }>("verification/submit", { nationalId }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: KEY });
+      // The session carries the derived verificationStatus used by every gate.
       qc.invalidateQueries({ queryKey: ["session"] });
     },
   });

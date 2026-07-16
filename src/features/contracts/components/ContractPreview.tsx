@@ -3,7 +3,7 @@
 import { Download, ArrowRight } from "lucide-react";
 import { Button } from "@/src/components/ui/Button";
 import { formatEGP, formatDate } from "@/src/utils/format";
-import type { ContractForm } from "@/src/lib/api/contracts/contract";
+import type { CreateLeaseContract } from "@/src/lib/api/contracts/contract";
 
 /**
  * Standard Egyptian lease rendered on screen. "تحميل العقد PDF" triggers the
@@ -16,7 +16,7 @@ import type { ContractForm } from "@/src/lib/api/contracts/contract";
  * that endpoint exists; swap the button handler for a download of the
  * server-generated PDF then (see ASSUMPTIONS.md).
  */
-export function ContractPreview({ data, onBack }: { data: ContractForm; onBack: () => void }) {
+export function ContractPreview({ data, onBack }: { data: CreateLeaseContract; onBack: () => void }) {
   return (
     <div className="mx-auto flex max-w-3xl flex-col gap-4">
       <div className="flex items-center justify-between gap-3 print:hidden">
@@ -45,8 +45,8 @@ export function ContractPreview({ data, onBack }: { data: ContractForm; onBack: 
 
         <div className="flex flex-col gap-2 text-body text-body-text">
           <p>
-            <b className="text-ink">الطرف الأول (المالك):</b> {data.landlordName} — الرقم القومي:{" "}
-            <span dir="ltr">{data.landlordNationalId}</span>
+            <b className="text-ink">الطرف الأول (المالك):</b> {data.ownerName} — الرقم القومي:{" "}
+            <span dir="ltr">{data.ownerNationalId}</span>
           </p>
           <p>
             <b className="text-ink">الطرف الثاني (المستأجر):</b> {data.tenantName} — الرقم القومي:{" "}
@@ -57,19 +57,19 @@ export function ContractPreview({ data, onBack }: { data: ContractForm; onBack: 
         <section className="flex flex-col gap-2 text-body text-body-text">
           <p>
             <b className="text-ink">البند الأول:</b> أجّر الطرف الأول للطرف الثاني العقار الكائن في:{" "}
-            {data.fullAddress}.
+            {data.propertyAddress}.
           </p>
           <p>
             <b className="text-ink">البند الثاني:</b> مدة الإيجار من {formatDate(data.startDate)} حتى{" "}
             {formatDate(data.endDate)}.
           </p>
           <p>
-            <b className="text-ink">البند الثالث:</b> قيمة الإيجار الشهري {formatEGP(data.monthlyRent)}، تُدفع في بداية كل
+            <b className="text-ink">البند الثالث:</b> قيمة الإيجار الشهري {formatEGP(data.rentAmount)}، تُدفع في بداية كل
             شهر.
           </p>
-          {data.additionalClauses && (
+          {data.customClauses && (
             <p>
-              <b className="text-ink">بنود إضافية متفق عليها:</b> {data.additionalClauses}
+              <b className="text-ink">بنود إضافية متفق عليها:</b> {data.customClauses}
             </p>
           )}
         </section>
@@ -77,7 +77,7 @@ export function ContractPreview({ data, onBack }: { data: ContractForm; onBack: 
         <footer className="mt-6 grid grid-cols-2 gap-8 pt-6 text-center text-small text-body-text">
           <div>
             <p className="mb-8 font-bold text-ink">الطرف الأول (المالك)</p>
-            <p className="border-t border-hairline pt-2">{data.landlordName}</p>
+            <p className="border-t border-hairline pt-2">{data.ownerName}</p>
           </div>
           <div>
             <p className="mb-8 font-bold text-ink">الطرف الثاني (المستأجر)</p>

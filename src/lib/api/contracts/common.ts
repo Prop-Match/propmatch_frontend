@@ -30,20 +30,46 @@ export const paginatedSchema = <T extends z.ZodTypeAny>(item: T) =>
     pageSize: z.number().int(),
   });
 
-/** Capability-based permission strings — see docs/analysis/rbac.md for the full matrix. */
+/**
+ * Capability-based permissions — see docs/analysis/rbac.md for the matrix.
+ * Check capabilities, never role names: that is what lets the Later `BROKER`
+ * role be added without rework (conflicts.md A2).
+ *
+ * Note: PII reveal is deliberately NOT a capability. It is a per-connection
+ * relationship gate (an ACCEPTED offer / CONNECTED match), enforced by the
+ * backend omitting the fields — see rbac.md and requirements.md §1.2.
+ */
 export const CapabilitySchema = z.enum([
-  "listing:approve",
-  "listing:reject",
+  // Tenant
+  "request:create",
+  "request:close",
+  "offer:accept",
+  "offer:reject",
+  "review:create",
+  "favorite:manage",
+  // Landlord
+  "listing:create",
+  "listing:archive",
+  "listing:boost",
+  "offer:send",
+  // Shared
+  "contract:generate",
+  // Admin (V1 = one flat ADMIN holding all of these)
+  "property:approve",
+  "property:reject",
   "kyc:review",
-  "payment:refund",
-  "report:export",
-  "review:delete",
-  "ticket:reply",
-  "pii:reveal",
-  "admin:create",
-  "admin:manage",
+  "request:approve",
+  "request:reject",
+  "review:moderate",
+  "payment:view",
+  "partner_lead:view",
 ]);
 export type Capability = z.infer<typeof CapabilitySchema>;
 
-export const ListingStatusSchema = z.enum(["draft", "pending", "approved", "rejected"]);
-export type ListingStatus = z.infer<typeof ListingStatusSchema>;
+/** ERD: `PROPERTY.status ENUM "PENDING, APPROVED, REJECTED, ARCHIVED"`. */
+export const PropertyStatusSchema = z.enum(["PENDING", "APPROVED", "REJECTED", "ARCHIVED"]);
+export type PropertyStatus = z.infer<typeof PropertyStatusSchema>;
+
+/** ERD: shared PENDING/APPROVED/REJECTED moderation shape (eKYC, reviews). */
+export const ModerationStatusSchema = z.enum(["PENDING", "APPROVED", "REJECTED"]);
+export type ModerationStatus = z.infer<typeof ModerationStatusSchema>;

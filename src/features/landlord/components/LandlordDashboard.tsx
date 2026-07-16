@@ -16,7 +16,7 @@ export function LandlordDashboard() {
   const { data: session } = useSession();
   const { data, isLoading, isError, refetch } = useMyProperties();
 
-  const notVerified = session && session.verificationStatus !== "verified";
+  const notVerified = session && session.verificationStatus !== "APPROVED";
 
   return (
     <div className="flex flex-col gap-5">

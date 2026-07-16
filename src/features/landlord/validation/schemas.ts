@@ -5,24 +5,10 @@ import { CreatePropertyRequestSchema } from "@/src/lib/api/contracts/property";
 export const addPropertyFormSchema = CreatePropertyRequestSchema;
 export type AddPropertyForm = z.infer<typeof addPropertyFormSchema>;
 
-/** Field groups per wizard step, used to validate incrementally. */
+/** Field groups per wizard step, used to validate incrementally (PRO-04). */
 export const stepFields = {
-  location: ["location"],
-  type: ["type"],
-  details: [
-    "monthlyRent",
-    "deposit",
-    "leaseDurationMonths",
-    "area",
-    "rooms",
-    "bathrooms",
-    "floor",
-    "hasElevator",
-    "furnished",
-    "finish",
-    "orientation",
-  ],
-  amenities: ["amenities"],
-  conditions: ["conditions"],
-  description: ["description", "photos"],
+  location: ["governorate", "city", "district", "manualAddress"],
+  type: ["propertyType", "title"],
+  details: ["rentAmount", "areaM2", "bedrooms", "bathrooms", "isFurnished", "hasElevator", "hasParking"],
+  description: ["description", "propertyAroundServices", "images"],
 } as const;

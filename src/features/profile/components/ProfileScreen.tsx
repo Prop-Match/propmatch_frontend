@@ -2,7 +2,7 @@
 
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { User as UserIcon, Mail, Phone, LogOut, ShieldAlert, LifeBuoy, ChevronLeft } from "lucide-react";
+import { User as UserIcon, Mail, Phone, LogOut, ShieldAlert, Scale, ChevronLeft } from "lucide-react";
 import Link from "next/link";
 import { useSession, useLogout } from "@/src/features/auth/hooks/useSession";
 import { VerifiedBadge } from "@/src/components/ui/VerifiedBadge";
@@ -42,7 +42,7 @@ export function ProfileScreen() {
           </p>
           <p className="flex items-center gap-2">
             <Phone className="size-4 text-muted" aria-hidden />
-            {user.phone}
+            {user.phoneNumber}
           </p>
         </div>
       </div>
@@ -50,7 +50,7 @@ export function ProfileScreen() {
       {/* Verification CTA — progressive verification (SRS 3.1/3.4): required
           before publishing a listing/request, accepting an offer, or revealing
           contact. Admins don't need it. */}
-      {user.verificationStatus !== "verified" && user.role !== "admin" && (
+      {user.verificationStatus !== "APPROVED" && user.role !== "admin" && (
         <Link href="/landlord/verify" className="flex items-center gap-3 rounded-card border border-pending/30 bg-pending-tint px-4 py-3">
           <ShieldAlert className="size-5 text-pending" aria-hidden />
           <span className="flex-1 text-small font-semibold text-pending">وثّق حسابك لتفعيل كل المزايا</span>
@@ -58,15 +58,16 @@ export function ProfileScreen() {
         </Link>
       )}
 
-      {/* Support entry point */}
+      {/* Legal assistant (PRO-17) — the only in-app help surface in V1;
+          customer-support ticketing is out of scope (conflicts.md B2). */}
       <Link
-        href="/support"
+        href="/tenant/legal"
         className="flex items-center gap-3 rounded-card border border-hairline bg-surface px-4 py-3 hover:border-primary/40"
       >
         <span className="flex size-9 items-center justify-center rounded-full bg-primary-tint text-primary">
-          <LifeBuoy className="size-5" aria-hidden />
+          <Scale className="size-5" aria-hidden />
         </span>
-        <span className="flex-1 text-small font-semibold text-ink">الدعم الفني</span>
+        <span className="flex-1 text-small font-semibold text-ink">المساعد القانوني</span>
         <ChevronLeft className="size-4 text-muted" aria-hidden />
       </Link>
 

@@ -6,7 +6,7 @@ import { useState } from "react";
 import { cn } from "@/src/utils/cn";
 import { formatNumber } from "@/src/utils/format";
 import { MatchScoreRing } from "./ui/MatchScoreRing";
-import type { PropertySummary } from "@/src/lib/api/contracts/property";
+import { propertyTypeLabels, type PropertySummary } from "@/src/lib/api/contracts/property";
 
 export interface PropertyCardProps {
   property: PropertySummary;
@@ -43,7 +43,7 @@ export function PropertyCard({ property, onClick, matchScore, className }: Prope
           />
         )}
         <div className="absolute top-2 start-2 flex flex-col items-start gap-1">
-          {property.boosted && (
+          {property.isBoosted && (
             <span className="inline-flex items-center gap-1 rounded-pill bg-pending-tint px-2 py-0.5 text-caption font-bold text-pending">
               <TrendingUp className="size-3" aria-hidden />
               مميّز
@@ -66,17 +66,20 @@ export function PropertyCard({ property, onClick, matchScore, className }: Prope
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0">
             <h3 className="truncate text-body font-bold leading-snug text-ink">{property.title}</h3>
-            <p className="mt-0.5 text-small text-muted">{property.neighborhood}</p>
+            {/* Pre-connection we only ever show the general area (SRS 3.4). */}
+            <p className="mt-0.5 text-small text-muted">
+              {property.district}، {property.city} · {propertyTypeLabels[property.propertyType]}
+            </p>
           </div>
           <div className="shrink-0 text-left">
-            <span className="text-title font-bold text-primary">{formatNumber(property.monthlyRent)}</span>
+            <span className="text-title font-bold text-primary">{formatNumber(property.rentAmount)}</span>
             <span className="block text-caption text-muted">ج.م / شهريًا</span>
           </div>
         </div>
         <div className="mt-3 flex items-center gap-3 border-t border-hairline pt-3 text-caption text-muted">
           <span className="flex items-center gap-1">
             <BedDouble className="size-3.5" aria-hidden />
-            {formatNumber(property.rooms)} غرف
+            {formatNumber(property.bedrooms)} غرف
           </span>
           <span className="flex items-center gap-1">
             <Bath className="size-3.5" aria-hidden />
@@ -84,9 +87,9 @@ export function PropertyCard({ property, onClick, matchScore, className }: Prope
           </span>
           <span className="flex items-center gap-1">
             <Ruler className="size-3.5" aria-hidden />
-            {formatNumber(property.area)} م²
+            {formatNumber(property.areaM2)} م²
           </span>
-          {property.furnished && (
+          {property.isFurnished && (
             <span className="flex items-center gap-1">
               <Sofa className="size-3.5" aria-hidden />
               مفروش

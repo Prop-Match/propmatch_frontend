@@ -51,8 +51,8 @@ export function SignupForm() {
         type="tel"
         inputMode="numeric"
         placeholder="01xxxxxxxxx"
-        error={errors.phone?.message}
-        {...register("phone")}
+        error={errors.phoneNumber?.message}
+        {...register("phoneNumber")}
       />
       <InputField
         label="كلمة المرور"

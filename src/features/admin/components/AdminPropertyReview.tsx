@@ -34,7 +34,7 @@ export function AdminPropertyReview({ id }: { id: string }) {
     );
   }
 
-  const alreadyReviewed = p && p.status !== "pending";
+  const alreadyReviewed = p && p.status !== "PENDING";
 
   return (
     <div className="flex flex-col gap-4">

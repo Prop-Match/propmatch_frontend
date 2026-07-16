@@ -1,16 +1,15 @@
 "use client";
 
 import Image from "next/image";
-import { BedDouble, Bath, Ruler, Building2, ArrowUpDown, Sofa, CheckCircle2, ImageOff } from "lucide-react";
+import { BedDouble, Bath, Ruler, Sofa, ArrowUpDown, Car, ImageOff, MapPin, Lock } from "lucide-react";
 import { useProperty } from "../hooks/useProperties";
-import { ContactGate } from "./ContactGate";
 import { MatchScoreRing } from "@/src/components/ui/MatchScoreRing";
 import { VerifiedBadge, OwnershipDisclaimer } from "@/src/components/ui/VerifiedBadge";
 import { StatusChip } from "@/src/components/ui/StatusChip";
 import { Skeleton } from "@/src/components/ui/Skeleton";
 import { ErrorState } from "@/src/components/ui/States";
-import { formatEGP, formatNumber } from "@/src/utils/format";
-import { amenityLabels, propertyTypeLabels, finishLabels, orientationLabels } from "@/src/lib/api/contracts/property";
+import { formatNumber } from "@/src/utils/format";
+import { propertyTypeLabels } from "@/src/lib/api/contracts/property";
 
 export function PropertyDetailView({
   id,
@@ -19,7 +18,7 @@ export function PropertyDetailView({
 }: {
   id: string;
   matchScore?: number;
-  /** True when the owner is viewing their own listing — no contact gate. */
+  /** True when the owner/admin is viewing — no tenant contact panel. */
   hideContact?: boolean;
 }) {
   const { data: p, isLoading, isError, refetch } = useProperty(id);
@@ -35,32 +34,32 @@ export function PropertyDetailView({
     );
   }
 
+  const cover = p.images.find((i) => i.isCover) ?? p.images[0];
   const facts = [
-    { Icon: BedDouble, label: "غرف", value: formatNumber(p.rooms) },
-    { Icon: Bath, label: "حمّامات", value: formatNumber(p.bathrooms) },
-    { Icon: Ruler, label: "المساحة", value: `${formatNumber(p.area)} م²` },
-    { Icon: Building2, label: "الدور", value: formatNumber(p.floor) },
-    { Icon: ArrowUpDown, label: "أسانسير", value: p.hasElevator ? "نعم" : "لا" },
-    { Icon: Sofa, label: "الفرش", value: p.furnished ? "مفروش" : "غير مفروش" },
+    { Icon: BedDouble, label: "غرف النوم", value: formatNumber(p.bedrooms) },
+    { Icon: Bath, label: "الحمّامات", value: formatNumber(p.bathrooms) },
+    { Icon: Ruler, label: "المساحة", value: `${formatNumber(p.areaM2)} م²` },
+    { Icon: Sofa, label: "الفرش", value: p.isFurnished ? "مفروش" : "غير مفروش" },
+    { Icon: ArrowUpDown, label: "أسانسير", value: p.hasElevator ? "يوجد" : "لا يوجد" },
+    { Icon: Car, label: "جراج", value: p.hasParking ? "يوجد" : "لا يوجد" },
   ];
 
   return (
     <div className="grid gap-6 lg:grid-cols-3">
       <div className="flex flex-col gap-5 lg:col-span-2">
-        {/* Gallery */}
         <div className="relative h-64 overflow-hidden rounded-card bg-background md:h-80">
-          {p.coverImage ? (
-            <Image src={p.coverImage} alt={p.title} fill sizes="(max-width:1024px) 100vw, 66vw" className="object-cover" />
+          {cover ? (
+            <Image src={cover.imageUrl} alt={p.title} fill sizes="(max-width:1024px) 100vw, 66vw" className="object-cover" />
           ) : (
             <div className="flex h-full items-center justify-center text-muted">
               <ImageOff className="size-10" aria-hidden />
             </div>
           )}
           <div className="absolute top-3 start-3 flex gap-2">
-            {p.boosted && (
+            {p.isBoosted && (
               <span className="rounded-pill bg-pending-tint px-2.5 py-0.5 text-caption font-bold text-pending">مميّز</span>
             )}
-            {p.status !== "approved" && <StatusChip status={p.status} />}
+            {p.status !== "APPROVED" && <StatusChip status={p.status} />}
           </div>
           {matchScore !== undefined && (
             <div className="absolute bottom-3 end-3 rounded-card bg-surface/95 p-1.5 shadow-card">
@@ -69,26 +68,23 @@ export function PropertyDetailView({
           )}
         </div>
 
-        {/* Title + price */}
         <div className="flex items-start justify-between gap-3">
           <div>
             <h1 className="text-h1 font-bold text-ink">{p.title}</h1>
-            <p className="mt-1 text-body text-muted">
-              {p.location.neighborhood}، {p.location.city} — {propertyTypeLabels[p.type]}
+            <p className="mt-1 flex items-center gap-1.5 text-body text-muted">
+              <MapPin className="size-4" aria-hidden />
+              {p.district}، {p.city}، {p.governorate} — {propertyTypeLabels[p.propertyType]}
             </p>
           </div>
           <div className="shrink-0 text-left">
-            <span className="text-h1 font-bold text-primary">{formatNumber(p.monthlyRent)}</span>
+            <span className="text-h1 font-bold text-primary">{formatNumber(p.rentAmount)}</span>
             <span className="block text-small text-muted">ج.م / شهريًا</span>
           </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
-          <VerifiedBadge status={p.ownerVerified ? "verified" : "unverified"} />
-        </div>
+        <VerifiedBadge status={p.ownerVerified ? "APPROVED" : "NOT_SUBMITTED"} />
         <OwnershipDisclaimer />
 
-        {/* Facts */}
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
           {facts.map(({ Icon, label, value }) => (
             <div key={label} className="flex items-center gap-2 rounded-control border border-hairline bg-surface p-3">
@@ -101,52 +97,68 @@ export function PropertyDetailView({
           ))}
         </div>
 
-        {/* Description */}
         <section>
           <h2 className="mb-2 text-title font-bold text-ink">الوصف</h2>
           <p className="whitespace-pre-line leading-relaxed text-body text-body-text">{p.description}</p>
         </section>
 
-        {/* Details */}
-        <section className="grid grid-cols-2 gap-x-6 gap-y-2 text-small sm:grid-cols-3">
-          <Detail label="مبلغ التأمين" value={formatEGP(p.deposit)} />
-          <Detail label="مدة العقد" value={`${formatNumber(p.leaseDurationMonths)} شهر`} />
-          <Detail label="التشطيب" value={finishLabels[p.finish]} />
-          <Detail label="الاتجاه" value={orientationLabels[p.orientation]} />
-          <Detail label="العنوان" value={p.location.detailedAddress} />
-        </section>
-
-        {/* Amenities */}
-        {p.amenities.length > 0 && (
+        {p.propertyAroundServices && (
           <section>
-            <h2 className="mb-2 text-title font-bold text-ink">المميزات</h2>
-            <div className="flex flex-wrap gap-2">
-              {p.amenities.map((a) => (
-                <span key={a} className="inline-flex items-center gap-1 rounded-pill bg-primary-tint px-3 py-1 text-small font-medium text-primary-dark">
-                  <CheckCircle2 className="size-3.5" aria-hidden />
-                  {amenityLabels[a]}
-                </span>
-              ))}
-            </div>
+            <h2 className="mb-2 text-title font-bold text-ink">الخدمات المحيطة</h2>
+            <p className="leading-relaxed text-body text-body-text">{p.propertyAroundServices}</p>
           </section>
         )}
       </div>
 
-      {/* Contact gate — sticky on desktop; hidden for the owner's own view */}
       {!hideContact && (
         <aside className="lg:sticky lg:top-20 lg:h-fit">
-          <ContactGate propertyId={p.id} />
+          <ContactPanel
+            revealed={p.contactRevealed}
+            ownerName={p.ownerName}
+            ownerPhoneNumber={p.ownerPhoneNumber}
+            manualAddress={p.manualAddress}
+          />
         </aside>
       )}
     </div>
   );
 }
 
-function Detail({ label, value }: { label: string; value: string }) {
+/**
+ * The PII gate, rendered. Pre-reveal the backend simply doesn't send the phone
+ * or exact address — there is nothing here to "hide" (rbac.md). Contact
+ * unlocks when the landlord's offer is accepted (the reverse marketplace),
+ * which is why there's no "request contact" button in V1.
+ */
+function ContactPanel({
+  revealed,
+  ownerName,
+  ownerPhoneNumber,
+  manualAddress,
+}: {
+  revealed: boolean;
+  ownerName: string | null;
+  ownerPhoneNumber: string | null;
+  manualAddress: string | null;
+}) {
   return (
-    <div className="flex justify-between gap-2 border-b border-hairline py-1.5">
-      <span className="text-muted">{label}</span>
-      <span className="font-semibold text-ink">{value}</span>
+    <div className="rounded-card border border-hairline bg-surface p-5 shadow-card">
+      <h3 className="mb-3 text-title font-bold text-ink">التواصل مع المالك</h3>
+      {revealed && ownerPhoneNumber ? (
+        <div className="flex flex-col gap-2 rounded-control bg-success-tint px-4 py-3">
+          <span className="text-small font-bold text-success">تم تأكيد التطابق</span>
+          {ownerName && <p className="text-body text-ink">{ownerName}</p>}
+          <a href={`tel:${ownerPhoneNumber}`} className="text-body font-semibold text-primary" dir="ltr">
+            {ownerPhoneNumber}
+          </a>
+          {manualAddress && <p className="text-small text-body-text">{manualAddress}</p>}
+        </div>
+      ) : (
+        <p className="flex items-center gap-2 rounded-control bg-background px-3 py-2.5 text-small text-muted">
+          <Lock className="size-4 shrink-0" aria-hidden />
+          رقم المالك والعنوان التفصيلي يظهران بعد قبول العرض.
+        </p>
+      )}
     </div>
   );
 }

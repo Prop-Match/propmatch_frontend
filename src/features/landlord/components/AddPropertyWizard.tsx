@@ -6,111 +6,98 @@ import { useForm, Controller, type UseFormReturn } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Sparkles, Check, ArrowLeft, ArrowRight } from "lucide-react";
 import { addPropertyFormSchema, stepFields, type AddPropertyForm } from "../validation/schemas";
-import { useCreateProperty, useOptimizeDescription, type CreatePropertyResult } from "../hooks/useLandlord";
-import { InputField, SelectField, TextAreaField } from "@/src/components/ui/Field";
+import { useCreateProperty, useOptimizeDescription, useQuota } from "../hooks/useLandlord";
+import { InputField, TextAreaField } from "@/src/components/ui/Field";
 import { ChipGroup } from "@/src/components/ui/Chip";
 import { Button } from "@/src/components/ui/Button";
+import { QuotaChip } from "@/src/components/ui/QuotaChip";
 import { useToast } from "@/src/components/ui/Toast";
 import { PaymentSheet } from "@/src/features/payments/PaymentSheet";
 import { cn } from "@/src/utils/cn";
-import {
-  amenityLabels,
-  propertyTypeLabels,
-  finishLabels,
-  orientationLabels,
-  type Amenity,
-  type PropertyType,
-  type Finish,
-  type Orientation,
-} from "@/src/lib/api/contracts/property";
+import { propertyTypeLabels, type PropertyType } from "@/src/lib/api/contracts/property";
+import type { PaymentType } from "@/src/lib/api/contracts/payment";
 
-const steps = ["الموقع", "النوع", "التفاصيل", "الخدمات", "الشروط", "الوصف"] as const;
+const steps = ["الموقع", "النوع", "التفاصيل", "الوصف"] as const;
 type StepKey = keyof typeof stepFields;
-const stepKeys: StepKey[] = ["location", "type", "details", "amenities", "conditions", "description"];
+const stepKeys: StepKey[] = ["location", "type", "details", "description"];
 
 const defaults: Partial<AddPropertyForm> = {
-  location: { governorate: "الدقهلية", city: "المنصورة", neighborhood: "", street: "", detailedAddress: "" },
-  type: "apartment",
-  monthlyRent: 3000,
-  deposit: 6000,
-  leaseDurationMonths: 12,
-  area: 100,
-  rooms: 2,
+  governorate: "الدقهلية",
+  city: "المنصورة",
+  district: "",
+  manualAddress: "",
+  title: "",
+  propertyType: "APARTMENT",
+  rentAmount: 3000,
+  areaM2: 100,
+  bedrooms: 2,
   bathrooms: 1,
-  floor: 1,
+  isFurnished: false,
   hasElevator: true,
-  furnished: false,
-  finish: "lux",
-  orientation: "bahari",
-  amenities: [],
-  conditions: {
-    familiesOnly: false,
-    studentsAllowed: true,
-    singlesAllowed: true,
-    foreignersAllowed: true,
-    childrenAllowed: true,
-    petsAllowed: false,
-    smokingAllowed: false,
-    minLeaseMonths: 6,
-  },
+  hasParking: false,
   description: "",
-  photos: ["https://images.unsplash.com/photo-1505691938895-1758d7feb511?w=800&h=500&fit=crop&auto=format"],
+  propertyAroundServices: "",
+  images: ["https://images.unsplash.com/photo-1505691938895-1758d7feb511?w=800&h=500&fit=crop&auto=format"],
 };
 
 export function AddPropertyWizard() {
   const router = useRouter();
   const toast = useToast();
-  const form = useForm<AddPropertyForm>({ resolver: zodResolver(addPropertyFormSchema), defaultValues: defaults, mode: "onTouched" });
+  const quota = useQuota();
+  const form = useForm<AddPropertyForm>({
+    resolver: zodResolver(addPropertyFormSchema),
+    defaultValues: defaults,
+    mode: "onTouched",
+  });
   const [step, setStep] = useState(0);
   const create = useCreateProperty();
-  const [payment, setPayment] = useState<{ open: boolean; propertyId?: string }>({ open: false });
+  const [paywall, setPaywall] = useState<PaymentType | null>(null);
 
   async function next() {
     const fields = stepFields[stepKeys[step]] as unknown as (keyof AddPropertyForm)[];
-    const valid = await form.trigger(fields);
-    if (valid) setStep((s) => Math.min(s + 1, steps.length - 1));
+    if (await form.trigger(fields)) setStep((s) => Math.min(s + 1, steps.length - 1));
   }
 
   function submit(values: AddPropertyForm) {
     create.mutate(values, {
-      onSuccess: (res: CreatePropertyResult) => {
-        if (res.requiresVerification) {
-          toast("success", "تم حفظ مسودة الإعلان. أكمل التوثيق لنشر إعلاناتك");
+      onSuccess: () => {
+        // ERD: PROPERTY.status defaults to PENDING — admin must approve (PRO-04).
+        toast("success", "تم إرسال إعلانك للمراجعة");
+        router.push("/landlord");
+      },
+      onError: (e) => {
+        if (e.code === "VERIFICATION_REQUIRED") {
+          toast("info", "وثّق هويتك أولًا لنشر إعلانك");
           router.push("/landlord/verify");
-        } else if (res.requiresPayment) {
-          // 2nd+ listing: pay before it enters review.
-          setPayment({ open: true, propertyId: res.property.id });
+        } else if (e.code === "QUOTA_EXHAUSTED") {
+          setPaywall((e.paymentType as PaymentType) ?? "NEW_LISTING");
         } else {
-          toast("success", "تم إرسال إعلانك للمراجعة");
-          router.push("/landlord");
+          toast("error", e.message);
         }
       },
-      onError: () => toast("error", "تعذر إنشاء الإعلان، حاول مرة أخرى"),
     });
   }
 
   return (
     <div className="mx-auto flex max-w-2xl flex-col gap-6">
-      <div>
-        <h1 className="text-h1 font-bold text-ink">إضافة عقار</h1>
-        <Stepper current={step} />
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-h1 font-bold text-ink">إضافة عقار</h1>
+          <Stepper current={step} />
+        </div>
+        {quota.data && (
+          <QuotaChip remaining={quota.data.freeListingsLeft} label="إعلانات مجانية متبقية" />
+        )}
       </div>
 
       <form onSubmit={form.handleSubmit(submit)} className="flex flex-col gap-5">
         {step === 0 && <LocationStep form={form} />}
         {step === 1 && <TypeStep form={form} />}
         {step === 2 && <DetailsStep form={form} />}
-        {step === 3 && <AmenitiesStep form={form} />}
-        {step === 4 && <ConditionsStep form={form} />}
-        {step === 5 && <DescriptionStep form={form} />}
+        {step === 3 && <DescriptionStep form={form} />}
 
         <div className="flex items-center justify-between gap-3">
-          <Button
-            type="button"
-            variant="ghost"
-            disabled={step === 0}
-            onClick={() => setStep((s) => Math.max(0, s - 1))}
-          >
+          <Button type="button" variant="ghost" disabled={step === 0} onClick={() => setStep((s) => Math.max(0, s - 1))}>
             <ArrowRight className="size-4" aria-hidden />
             السابق
           </Button>
@@ -122,20 +109,20 @@ export function AddPropertyWizard() {
           ) : (
             <Button type="submit" loading={create.isPending}>
               <Check className="size-4" aria-hidden />
-              نشر الإعلان
+              إرسال للمراجعة
             </Button>
           )}
         </div>
       </form>
 
       <PaymentSheet
-        open={payment.open}
-        onClose={() => setPayment({ open: false })}
-        context="listing"
-        propertyId={payment.propertyId}
+        open={paywall !== null}
+        onClose={() => setPaywall(null)}
+        paymentType={paywall ?? "NEW_LISTING"}
         onActivated={() => {
-          toast("success", "تم الدفع وإرسال إعلانك للمراجعة");
-          router.push("/landlord");
+          setPaywall(null);
+          toast("success", "تم تحديث رصيدك — أرسل إعلانك الآن");
+          quota.refetch();
         }}
       />
     </div>
@@ -174,22 +161,27 @@ function LocationStep({ form: { register, formState: { errors } } }: StepProps) 
   return (
     <Card>
       <div className="grid gap-3 sm:grid-cols-2">
-        <InputField label="المحافظة" {...register("location.governorate")} error={errors.location?.governorate?.message} />
-        <InputField label="المدينة" {...register("location.city")} error={errors.location?.city?.message} />
-        <InputField label="الحي" {...register("location.neighborhood")} error={errors.location?.neighborhood?.message} />
-        <InputField label="الشارع (اختياري)" {...register("location.street")} />
+        <InputField label="المحافظة" {...register("governorate")} error={errors.governorate?.message} />
+        <InputField label="المدينة" {...register("city")} error={errors.city?.message} />
       </div>
-      <InputField label="عنوان تفصيلي" {...register("location.detailedAddress")} error={errors.location?.detailedAddress?.message} />
+      <InputField label="الحي" {...register("district")} error={errors.district?.message} />
+      <InputField
+        label="العنوان التفصيلي"
+        hint="لا يظهر للمستأجرين إلا بعد قبول العرض والتواصل."
+        {...register("manualAddress")}
+        error={errors.manualAddress?.message}
+      />
     </Card>
   );
 }
 
-function TypeStep({ form: { control } }: StepProps) {
+function TypeStep({ form: { control, register, formState: { errors } } }: StepProps) {
   return (
     <Card>
+      <InputField label="عنوان الإعلان" placeholder="شقة مفروشة قرب جامعة المنصورة" {...register("title")} error={errors.title?.message} />
       <Controller
         control={control}
-        name="type"
+        name="propertyType"
         render={({ field }) => (
           <ChipGroup
             label="نوع العقار"
@@ -207,72 +199,16 @@ function DetailsStep({ form: { register, formState: { errors } } }: StepProps) {
   return (
     <Card>
       <div className="grid gap-3 sm:grid-cols-2">
-        <InputField label="السعر الشهري" type="number" inputMode="numeric" {...register("monthlyRent", { valueAsNumber: true })} error={errors.monthlyRent?.message} />
-        <InputField label="مبلغ التأمين" type="number" inputMode="numeric" {...register("deposit", { valueAsNumber: true })} />
-        <InputField label="مدة العقد (شهور)" type="number" inputMode="numeric" {...register("leaseDurationMonths", { valueAsNumber: true })} />
-        <InputField label="المساحة (م²)" type="number" inputMode="numeric" {...register("area", { valueAsNumber: true })} />
-        <InputField label="عدد الغرف" type="number" inputMode="numeric" {...register("rooms", { valueAsNumber: true })} />
-        <InputField label="عدد الحمامات" type="number" inputMode="numeric" {...register("bathrooms", { valueAsNumber: true })} />
-        <InputField label="الدور" type="number" inputMode="numeric" {...register("floor", { valueAsNumber: true })} />
-        <SelectField label="التشطيب" options={(Object.keys(finishLabels) as Finish[]).map((v) => ({ value: v, label: finishLabels[v] }))} {...register("finish")} />
-        <SelectField label="اتجاه الشقة" options={(Object.keys(orientationLabels) as Orientation[]).map((v) => ({ value: v, label: orientationLabels[v] }))} {...register("orientation")} />
+        <InputField label="الإيجار الشهري (ج.م)" type="number" inputMode="numeric" {...register("rentAmount", { valueAsNumber: true })} error={errors.rentAmount?.message} />
+        <InputField label="المساحة (م²)" type="number" inputMode="numeric" {...register("areaM2", { valueAsNumber: true })} error={errors.areaM2?.message} />
+        <InputField label="عدد غرف النوم" type="number" inputMode="numeric" {...register("bedrooms", { valueAsNumber: true })} error={errors.bedrooms?.message} />
+        <InputField label="عدد الحمّامات" type="number" inputMode="numeric" {...register("bathrooms", { valueAsNumber: true })} error={errors.bathrooms?.message} />
       </div>
       <div className="flex flex-wrap gap-4">
-        <label className="flex items-center gap-2 text-small text-body-text">
-          <input type="checkbox" className="size-4 accent-[var(--color-primary)]" {...register("hasElevator")} />
-          يوجد أسانسير؟
-        </label>
-        <label className="flex items-center gap-2 text-small text-body-text">
-          <input type="checkbox" className="size-4 accent-[var(--color-primary)]" {...register("furnished")} />
-          مفروش؟
-        </label>
+        <Toggle label="مفروش" {...register("isFurnished")} />
+        <Toggle label="يوجد أسانسير" {...register("hasElevator")} />
+        <Toggle label="يوجد جراج" {...register("hasParking")} />
       </div>
-    </Card>
-  );
-}
-
-function AmenitiesStep({ form: { control } }: StepProps) {
-  return (
-    <Card>
-      <Controller
-        control={control}
-        name="amenities"
-        render={({ field }) => (
-          <ChipGroup
-            label="الخدمات"
-            multiple
-            options={(Object.keys(amenityLabels) as Amenity[]).map((v) => ({ value: v, label: amenityLabels[v] }))}
-            value={field.value}
-            onChange={field.onChange}
-          />
-        )}
-      />
-    </Card>
-  );
-}
-
-const conditionToggles: { name: keyof AddPropertyForm["conditions"]; label: string }[] = [
-  { name: "familiesOnly", label: "عائلات فقط؟" },
-  { name: "studentsAllowed", label: "طلبة؟" },
-  { name: "singlesAllowed", label: "أفراد؟" },
-  { name: "foreignersAllowed", label: "أجانب؟" },
-  { name: "childrenAllowed", label: "أطفال؟" },
-  { name: "petsAllowed", label: "حيوانات أليفة؟" },
-  { name: "smokingAllowed", label: "تدخين؟" },
-];
-
-function ConditionsStep({ form: { register } }: StepProps) {
-  return (
-    <Card>
-      <div className="grid grid-cols-2 gap-3">
-        {conditionToggles.map(({ name, label }) => (
-          <label key={name} className="flex items-center gap-2 text-small text-body-text">
-            <input type="checkbox" className="size-4 accent-[var(--color-primary)]" {...register(`conditions.${name}`)} />
-            {label}
-          </label>
-        ))}
-      </div>
-      <InputField label="الحد الأدنى لمدة الإيجار (شهور)" type="number" inputMode="numeric" {...register("conditions.minLeaseMonths", { valueAsNumber: true })} />
     </Card>
   );
 }
@@ -285,10 +221,12 @@ function DescriptionStep({ form }: StepProps) {
   function runOptimize() {
     optimize.mutate(description || "عقار للإيجار", {
       onSuccess: (res) => {
+        // Never auto-publish: the landlord reviews the rewrite first (PRO-10).
         form.setValue("description", res.optimized, { shouldValidate: true });
-        toast("success", `تم تحسين الوصف — المتبقي: ${res.remainingUses}`);
+        toast("success", `تم تحسين الوصف — المتبقي: ${res.optimizerUsesLeft}`);
       },
-      onError: (err) => toast("error", err.exhausted ? "انتهت استخداماتك المجانية للتحسين" : err.message),
+      onError: (e) =>
+        toast("error", e.code === "QUOTA_EXHAUSTED" ? "انتهت استخداماتك المجانية للتحسين" : e.message),
     });
   }
 
@@ -298,7 +236,7 @@ function DescriptionStep({ form }: StepProps) {
         <span className="text-small font-semibold text-ink">الوصف</span>
         <Button type="button" variant="ghost" size="sm" onClick={runOptimize} loading={optimize.isPending}>
           <Sparkles className="size-4" aria-hidden />
-          تحسين الوصف — Optimize with AI
+          تحسين الوصف بالذكاء الاصطناعي
         </Button>
       </div>
       <TextAreaField
@@ -307,7 +245,24 @@ function DescriptionStep({ form }: StepProps) {
         error={form.formState.errors.description?.message}
         {...form.register("description")}
       />
-      <p className="text-caption text-muted">حوّل وصفك إلى نص تسويقي احترافي — استخدامات مجانية محدودة.</p>
+      <TextAreaField
+        label="الخدمات المحيطة"
+        hint="تُستخدم في المطابقة الذكية — اذكر ما حول العقار (جامعة، مواصلات، أسواق…)."
+        placeholder="جامعة المنصورة، مواصلات، سوبر ماركت، صيدلية"
+        {...form.register("propertyAroundServices")}
+      />
+      {form.formState.errors.images && (
+        <p className="text-caption text-error">{form.formState.errors.images.message}</p>
+      )}
     </Card>
   );
 }
+
+const Toggle = function Toggle({ label, ...rest }: React.InputHTMLAttributes<HTMLInputElement> & { label: string }) {
+  return (
+    <label className="flex cursor-pointer items-center gap-2 text-small text-body-text">
+      <input type="checkbox" className="size-4 accent-[var(--color-primary)]" {...rest} />
+      {label}
+    </label>
+  );
+};

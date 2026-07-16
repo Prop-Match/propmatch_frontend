@@ -1,50 +1,82 @@
 import { z } from "zod";
 
 /**
- * Paymob payment DTOs (SRS FR6). The client never talks to Paymob directly —
- * it asks the backend for a checkout session, then polls the entitlement
- * after the client-side success signal (see ASSUMPTIONS.md #8, webhook race).
+ * Mirrors the ERD's `PAYMENT_TRANSACTION` + `USER_QUOTA` (PRO-14/18).
+ *
+ * The client never talks to Paymob directly: it asks the backend for a
+ * checkout, renders the Paymob iframe, and the **webhook** (HMAC-validated,
+ * idempotent — backend duty) credits the quota. A client-side "success" means
+ * *captured*, not *credited* — poll the quota afterwards (ASSUMPTIONS.md #17).
  */
 
-export const PaymentContextSchema = z.enum(["listing", "boost", "matchmaker-refill"]);
-export type PaymentContext = z.infer<typeof PaymentContextSchema>;
+/** ERD: `payment_type ENUM "NEW_LISTING, BOOST_LISTING, REFILL_MATCHES, OFFER_PACK"`. */
+export const PaymentTypeSchema = z.enum([
+  "NEW_LISTING",
+  "BOOST_LISTING",
+  "REFILL_MATCHES",
+  "OFFER_PACK",
+]);
+export type PaymentType = z.infer<typeof PaymentTypeSchema>;
 
-export const paymentContextLabels: Record<PaymentContext, string> = {
-  listing: "رسوم إضافة إعلان",
-  boost: "تمييز الإعلان",
-  "matchmaker-refill": "محاولات مطابقة إضافية",
+export const paymentTypeLabels: Record<PaymentType, string> = {
+  NEW_LISTING: "رسوم إضافة إعلان",
+  BOOST_LISTING: "تمييز الإعلان",
+  REFILL_MATCHES: "محاولات مطابقة إضافية",
+  OFFER_PACK: "باقة عروض إضافية",
 };
 
+/** ERD: `status ENUM "PENDING, SUCCESS, FAILED"`. */
+export const PaymentStatusSchema = z.enum(["PENDING", "SUCCESS", "FAILED"]);
+export type PaymentStatus = z.infer<typeof PaymentStatusSchema>;
+
 export const CreateCheckoutRequestSchema = z.object({
-  context: PaymentContextSchema,
-  /** For listing/boost contexts: which property this payment activates. */
+  paymentType: PaymentTypeSchema,
+  /** For NEW_LISTING / BOOST_LISTING: the property the payment activates. */
   propertyId: z.string().optional(),
 });
 export type CreateCheckoutRequest = z.infer<typeof CreateCheckoutRequestSchema>;
 
 export const CheckoutSessionSchema = z.object({
-  checkoutId: z.string(),
-  amountEgp: z.number(),
-  context: PaymentContextSchema,
+  paymobOrderId: z.string(),
+  amount: z.number(),
+  currency: z.literal("EGP"),
+  paymentType: PaymentTypeSchema,
+  /** Paymob iframe URL the client renders. */
+  iframeUrl: z.string().nullable(),
 });
 export type CheckoutSession = z.infer<typeof CheckoutSessionSchema>;
 
-export const PaymentStatusSchema = z.enum(["pending", "success", "failed"]);
-export type PaymentStatus = z.infer<typeof PaymentStatusSchema>;
-
-export const PaymentResultSchema = z.object({
-  checkoutId: z.string(),
-  status: PaymentStatusSchema,
-  /** True once the webhook landed and the entitlement is actually active. */
-  entitlementActive: z.boolean(),
-});
-export type PaymentResult = z.infer<typeof PaymentResultSchema>;
-
-export const TransactionSchema = z.object({
+export const PaymentTransactionSchema = z.object({
   id: z.string(),
-  context: PaymentContextSchema,
-  amountEgp: z.number(),
+  paymobOrderId: z.string(),
+  paymobTransactionId: z.string().nullable(),
+  amount: z.number(),
+  currency: z.literal("EGP"),
+  paymentType: PaymentTypeSchema,
   status: PaymentStatusSchema,
+  paidAt: z.string().nullable(),
   createdAt: z.string(),
 });
-export type Transaction = z.infer<typeof TransactionSchema>;
+export type PaymentTransaction = z.infer<typeof PaymentTransactionSchema>;
+
+/**
+ * ERD: `USER_QUOTA` — **landlords only** (1:1). Tenants have no row, so the UI
+ * must tolerate its absence (requirements.md §6).
+ */
+export const UserQuotaSchema = z.object({
+  freeListingsLeft: z.number().int(),
+  optimizerUsesLeft: z.number().int(),
+  freeOffersLeft: z.number().int(),
+  lastResetDate: z.string().nullable(),
+});
+export type UserQuota = z.infer<typeof UserQuotaSchema>;
+
+/** Which quota a paywall is about — maps 1:1 to the payment that refills it. */
+export const QuotaFieldSchema = z.enum(["freeListingsLeft", "optimizerUsesLeft", "freeOffersLeft"]);
+export type QuotaField = z.infer<typeof QuotaFieldSchema>;
+
+export const quotaRefillPaymentType: Record<QuotaField, PaymentType> = {
+  freeListingsLeft: "NEW_LISTING",
+  optimizerUsesLeft: "REFILL_MATCHES",
+  freeOffersLeft: "OFFER_PACK",
+};
