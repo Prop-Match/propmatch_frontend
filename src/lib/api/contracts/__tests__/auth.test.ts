@@ -11,25 +11,24 @@ describe("auth contracts", () => {
     expect(result.success).toBe(false);
   });
 
-  it("requires the uniform user role on registration", () => {
-    const result = RegisterRequestSchema.safeParse({
-      fullName: "سارة أحمد",
-      email: "sara@example.com",
-      phone: "01012345678",
-      password: "12345678",
-      role: "user",
-    });
-    expect(result.success).toBe(true);
+  const base = {
+    fullName: "سارة أحمد",
+    email: "sara@example.com",
+    phone: "01012345678",
+    password: "12345678",
+  };
+
+  // ERD: USER.role is a single enum and signup is explicitly Tenant OR
+  // Landlord (PRO-02) — separate account per role, no unified/base role.
+  it.each(["tenant", "landlord"])("accepts signing up explicitly as %s", (role) => {
+    expect(RegisterRequestSchema.safeParse({ ...base, role }).success).toBe(true);
   });
 
-  it("rejects an unknown account role", () => {
-    const result = RegisterRequestSchema.safeParse({
-      fullName: "سارة أحمد",
-      email: "sara@example.com",
-      phone: "01012345678",
-      password: "12345678",
-      role: "broker",
-    });
-    expect(result.success).toBe(false);
+  it("rejects self-signup as admin", () => {
+    expect(RegisterRequestSchema.safeParse({ ...base, role: "admin" }).success).toBe(false);
+  });
+
+  it.each(["user", "both", "broker"])("rejects the non-V1 role %s", (role) => {
+    expect(RegisterRequestSchema.safeParse({ ...base, role }).success).toBe(false);
   });
 });

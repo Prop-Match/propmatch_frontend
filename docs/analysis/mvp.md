@@ -1,79 +1,69 @@
-# MVP prioritization
+# V1 scope — mapped to the PRO-01…19 backlog
 
-Bias toward the trust + matching core, per the master build prompt's
-instruction. "V1" = must-ship before any pilot launch in Mansoura.
+V1 **is** the Sprint Plan. Anything not traceable to a PRO ticket is *Later*.
+Status reflects the frontend only (the backend is the team's).
 
-## V1 — Must-have
+Legend: ✅ done · 🔶 exists but must be reworked to the ERD · ❌ not built
 
-The minimum for the core promise ("rent directly from a verified owner, no
-broker, AI-matched, ready lease") to actually work end-to-end:
+## Sprint 1 — Foundation, data collection, realtime
 
-1. **Auth & Accounts** — sign up (3-way role choice), log in, unified
-   session, dual-role mode switch.
-2. **eKYC** — full wizard (ID front/back, selfie, processing, success/fail,
-   lock-after-3), ownership disclaimer shown persistently. Required to
-   unlock listing creation; encouraged-not-required for tenants per the
-   spec.
-3. **Listings & Moderation (core loop)** — landlord create/edit listing
-   (multi-step form, no Form Optimizer yet), submit → pending → admin
-   approve/reject → visible to tenants once approved.
-4. **Tenant Browse + Smart Matching** — hybrid intake form (structured +
-   open RAG field), match results with score ring, quota countdown,
-   quota-exhausted → Paymob.
-5. **Gated contact** — "تواصل مع المالك," phone hidden until match
-   confirmed (even with the accept-flow question in `requirements.md`
-   unresolved, ship the *simplest* correct version: tenant requests contact,
-   landlord sees + approves the request, then reveal).
-6. **Paymob payment surface** — one reusable component, all three contexts,
-   default/loading/success/error states. Needed by both Listings (pay after
-   first free) and Matching (refill).
-7. **Admin review queues** — property review and eKYC review, with
-   approve/reject actions and audit logging. Live-queue polish (WebSocket
-   auto slide-in) can ship as polling first and upgrade later — the
-   *decisions* (approve/reject) are must-have; the *realtime feel* is
-   should-have.
-8. **RBAC enforcement** — even a minimal 2-role admin set (Super Admin +
-   one operational role) must be capability-checked and audited from day
-   one; retrofitting RBAC after building admin screens without it is far
-   more expensive than building it in from the start.
-9. **Contract generator (form → PDF)** — this is explicitly what closes the
-   loop ("ready-to-download lease" is core positioning copy).
+| Ticket | Frontend scope | Status |
+|---|---|---|
+| **PRO-01** Infra (NestJS/Next/Postgres/Docker) | Next.js app scaffolded, Tailwind RTL+Cairo, i18n `ar-EG`, TanStack Query, BFF auth shell, mock backend, Jest+MSW | ✅ (single app, not monorepo — `conflicts.md` B1) |
+| **PRO-02** Role-based auth (Tenant **or** Landlord), JWT, `@Roles()`, login UI | Role-scoped signup/login, httpOnly cookies via BFF, route guards, role landing | 🔶 signup/login exist; separate-account model now correct; needs contract alignment |
+| **PRO-03** Manual eKYC (National ID + Selfie → S3, status `PENDING`) | Upload wizard (ID front/back → selfie), submit → PENDING, statuses, resubmit on reject | 🔶 **rewrite to ERD** (currently license/proof-of-address + cooldown — `conflicts.md` B3) |
+| **PRO-04** Property listing form + CRUD, defaults `PENDING` | Multi-step form + multi-image upload, status chips | 🔶 **rewrite fields to ERD** (governorate/city/district/manual_address/property_around_services/has_parking; 3 types; `PROPERTY_IMAGE`) |
+| **PRO-05** Tenant request form, defaults `PENDING` | Request form (budget range, locations, type, bedrooms, furnished, flexibility_score, lifestyle_requirements) + draft save | ❌ **not built** |
+| **PRO-06** Live admin notifications (Socket.io toasts) | Socket.io client, live toasts for new eKYC/property/request | ❌ (currently polling — must move to Socket.io) |
+| **PRO-07** Protected admin dashboard + pending tables | Protected routes, queues fetching PENDING entities | 🔶 exists; extend to 4 queues (eKYC, property, **request**, **review**) |
 
-## Should-have (V1.1 — soon after pilot, not blocking it)
+## Sprint 2 — Moderation, vector DB, AI core
 
-- **Form Optimizer** ("تحسين الوصف") — valuable but the listing flow works
-  without it; ship listings first, add the AI polish once the core loop is
-  proven.
-- **Legal chatbot** — free, low-risk, high trust-value, but not on the
-  critical path of a rental transaction.
-- **Boost listing** — a monetization feature, not a functional requirement
-  for the marketplace to work.
-- **Live WebSocket admin queue** (upgrade from polling) + notification bell
-  badge — polish on top of the must-have approve/reject capability.
-- **Customer Service tickets** — needed once there are real users generating
-  support load, not needed for the first cohort of a small Mansoura pilot
-  where support can plausibly be handled manually at first.
+| Ticket | Frontend scope | Status |
+|---|---|---|
+| **PRO-08** Admin approve/reject (eKYC, properties, reviews, requests) | 4 moderation flows, reject-with-reason, rejected users prompted to re-upload, 409 handling | 🔶 property + eKYC exist; add **requests** + **reviews**; align to ERD |
+| **PRO-09** Vector DB pipeline (embeddings on approval) | *Backend-owned.* Frontend: don't present semantic results as exhaustive | n/a (backend) |
+| **PRO-10** AI Form Optimizer (before/after, quota) | «تحسين الوصف» button, before/after, `optimizer_uses_left` counter, **streamed** | 🔶 exists; add streaming + ERD quota field |
+| **PRO-11** Hybrid search (SQL filters + semantic → match score) | *Backend-owned.* Frontend: filters UI + ranked results + score rings | 🔶 score ring exists; intake must become `TENANT_REQUEST` |
+| **PRO-12** Reverse-marketplace API (offer → tenant request) | *Backend-owned.* | n/a (backend) |
+| **PRO-13** Matchmaker & Offers UI (tenant results, landlord request browsing, Send Offer form) | Landlord browses approved requests w/ match score; Send Offer (property + pitch + price); tenant results | ❌ **not built — the core differentiator** |
 
-## Nice-to-have (V2+)
+## Sprint 3 — Monetization, B2B, chatbot, launch
 
-- **Reviews & Moderation** — no reviews exist until after tenants have
-  actually completed rentals through the platform; genuinely can't be
-  populated meaningfully at pilot launch.
-- **Financial reports/dashboards, charts, exports** (Recharts-driven admin
-  financial views) — needed once transaction volume justifies dedicated
-  reporting; a simple transaction list is enough at V1 (already implied by
-  "must-have" Paymob surface's transaction history, not a full reporting
-  suite).
-- **Rich admin activity logs / login history UI** — the underlying
-  AuditLog must exist from V1 (must-have, item 8), but a dedicated
-  browsing UI for it can wait.
+| Ticket | Frontend scope | Status |
+|---|---|---|
+| **PRO-14** Paymob iframe + webhook-driven quota | Payment sheet, 4 `payment_type`s, post-success quota poll | 🔶 exists; align `payment_type` enum (add `OFFER_PACK`), real iframe |
+| **PRO-15** Contract generator → PDF (merges eKYC data) | Form → HTML→PDF, auto-fill verified names/national IDs (with consent), download | 🔶 exists client-side; move to backend PDF + persist `LEASE_CONTRACT` |
+| **PRO-16** B2B lead gen (Moving/Insurance opt-in after acceptance) | Opt-in UI post-acceptance → `PARTNER_LEAD` | ❌ **not built** |
+| **PRO-17** Legal chatbot (RAG, off-topic decline) | Chat UI, **streamed**, graceful decline, `transfer_to_human_support` | 🔶 UI exists; add streaming + real endpoint |
+| **PRO-18** Freemium enforcer (quota decrement + paywall modal at 0) | Quota chips, paywall modals, **feature-flagged** for free launch | 🔶 exists; align to `USER_QUOTA` fields |
+| **PRO-19** Deploy (Vercel) + responsive + E2E | Deploy, mobile-responsive, E2E | ❌ |
 
-## Why this ordering
+## Also required by the ERD/SRS but not its own ticket
 
-The product's differentiation is trust (verified identity + honest
-ownership disclaimer) and AI matching (the hybrid intake + RAG). Everything
-in V1 exists to make one tenant and one landlord complete one real rental
-transaction, end to end, safely. Monetization polish (boosts, Form
-Optimizer) and community-trust features (reviews) only matter once that
-loop is proven — building them first would be optimizing a transaction flow
-that doesn't work yet.
+| Item | Where | Status |
+|---|---|---|
+| `FAVORITE` (tenant bookmarks) | ERD; prompt §8.7 | ❌ |
+| `PROPERTY_REVIEW` submit (1–5★ + comment → PENDING) | ERD; SRS 3.7; PRO-08 moderates it | ❌ (submit side) |
+| `MATCH_CONNECTION` + **phone reveal** | ERD; SRS 3.4 | ❌ (current reveal uses a non-ERD "inquiry") |
+| `NOTIFICATION` bell w/ ERD `type` enum | ERD; PRO-06 | 🔶 sample data → real entity |
+| Admin **Payment Records** + **Partner Lead Records** (Recharts) | prompt §8.13 | 🔶 stats page exists; repoint to real entities |
+
+## Build order (recommended)
+
+1. **Phase 2** — delete out-of-scope code; rewrite contracts to the ERD;
+   rebuild the mock backend. *Nothing else can be correct until this lands.*
+2. **Vertical slice: reverse marketplace** (PRO-05 → 13 → 16) — highest risk,
+   the differentiator, and it exercises quota + PII gate + notifications.
+3. eKYC to ERD (PRO-03) + property fields (PRO-04) + 4 moderation queues (PRO-08).
+4. Socket.io (PRO-06) replacing polling.
+5. Payments/quotas (PRO-14/18) · contract (PRO-15) · streamed AI (PRO-10/17).
+6. Favorites · reviews · deploy (PRO-19).
+
+## Explicitly *Later* (documented, not built)
+
+In-platform messaging · viewings/appointments · deal-completion lifecycle
+(Shortlisted→Viewing→Completed) · mutual tenant↔owner reputation · deal-evidence
+/ move-in record · **BROKER** role + broker teams · advanced analytics ·
+premium subscriptions · extra partner services · admin sub-roles & audit UI ·
+customer-support ticketing. See `conflicts.md` A2/A3/A4/A7/A8 + B2.

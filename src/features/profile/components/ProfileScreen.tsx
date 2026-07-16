@@ -2,21 +2,17 @@
 
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { User as UserIcon, Mail, Phone, LogOut, Search, Home, ShieldAlert, LifeBuoy, ChevronLeft } from "lucide-react";
+import { User as UserIcon, Mail, Phone, LogOut, ShieldAlert, LifeBuoy, ChevronLeft } from "lucide-react";
 import Link from "next/link";
 import { useSession, useLogout } from "@/src/features/auth/hooks/useSession";
 import { VerifiedBadge } from "@/src/components/ui/VerifiedBadge";
 import { Button } from "@/src/components/ui/Button";
 import { Skeleton } from "@/src/components/ui/Skeleton";
-import { useSessionUiStore } from "@/src/lib/store/useSessionUiStore";
-import { isDualCapable } from "@/src/features/auth/roleRouting";
-import { cn } from "@/src/utils/cn";
 
 export function ProfileScreen() {
   const router = useRouter();
   const { data: user, isLoading } = useSession();
   const logout = useLogout();
-  const { activeRoleContext, setActiveRoleContext } = useSessionUiStore();
 
   useEffect(() => {
     if (!isLoading && !user) router.push("/login");
@@ -24,8 +20,6 @@ export function ProfileScreen() {
 
   if (isLoading) return <Skeleton className="h-96 w-full" />;
   if (!user) return null;
-
-  const isDual = isDualCapable(user.role);
 
   return (
     <div className="mx-auto flex max-w-xl flex-col gap-5">
@@ -53,43 +47,15 @@ export function ProfileScreen() {
         </div>
       </div>
 
-      {/* Verification CTA — any dual-capable account that isn't verified yet */}
-      {user.verificationStatus !== "verified" && isDual && (
+      {/* Verification CTA — progressive verification (SRS 3.1/3.4): required
+          before publishing a listing/request, accepting an offer, or revealing
+          contact. Admins don't need it. */}
+      {user.verificationStatus !== "verified" && user.role !== "admin" && (
         <Link href="/landlord/verify" className="flex items-center gap-3 rounded-card border border-pending/30 bg-pending-tint px-4 py-3">
           <ShieldAlert className="size-5 text-pending" aria-hidden />
-          <span className="flex-1 text-small font-semibold text-pending">وثّق حسابك لنشر إعلاناتك</span>
+          <span className="flex-1 text-small font-semibold text-pending">وثّق حسابك لتفعيل كل المزايا</span>
           <span className="text-small text-pending">←</span>
         </Link>
-      )}
-
-      {/* Dual-role mode switch */}
-      {isDual && (
-        <div className="flex flex-col gap-3 rounded-card border border-hairline bg-surface p-5">
-          <p className="text-small font-semibold text-ink">تبديل العرض</p>
-          <div className="grid grid-cols-2 gap-3">
-            {(
-              [
-                { mode: "tenant", label: "مستأجر", Icon: Search, href: "/tenant" },
-                { mode: "landlord", label: "مالك", Icon: Home, href: "/landlord" },
-              ] as const
-            ).map(({ mode, label, Icon, href }) => (
-              <button
-                key={mode}
-                onClick={() => {
-                  setActiveRoleContext(mode);
-                  router.push(href);
-                }}
-                className={cn(
-                  "flex flex-col items-center gap-1 rounded-card border p-4 transition-colors",
-                  activeRoleContext === mode ? "border-primary bg-primary-tint" : "border-hairline hover:border-primary/40",
-                )}
-              >
-                <Icon className={cn("size-6", activeRoleContext === mode ? "text-primary" : "text-muted")} aria-hidden />
-                <span className="text-small font-bold text-ink">{label}</span>
-              </button>
-            ))}
-          </div>
-        </div>
       )}
 
       {/* Support entry point */}

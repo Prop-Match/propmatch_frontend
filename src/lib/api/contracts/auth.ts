@@ -1,19 +1,20 @@
 import { z } from "zod";
 
 /**
- * Auth contracts. Field names/shapes are assumptions pending the real ERD —
- * see ASSUMPTIONS.md, "Auth & account model".
+ * Auth contracts. Mirrors the Final ERD's `USER` entity — casing is mapped to
+ * camelCase at the API boundary (see ASSUMPTIONS.md #2).
  */
 
 /**
- * Normal marketplace accounts share the same base role. The legacy
- * tenant/landlord/both values are accepted while the backend contract is
- * reconciled, but new signups use "user"; listing capability comes from
- * verificationStatus, not role.
+ * ERD: `USER.role ENUM "TENANT, LANDLORD, ADMIN"`. A single role per account —
+ * someone who is both an owner and a tenant creates two separate accounts,
+ * each with its own eKYC (docs/analysis/conflicts.md A1). `BROKER` is a Later
+ * role (A2): add it here, never by hardcoding role names in UI/logic.
  */
 export const AccountRoleSchema = z.enum(["tenant", "landlord", "admin"]);
 export type AccountRole = z.infer<typeof AccountRoleSchema>;
 
+/** Public signup is explicitly Tenant OR Landlord (PRO-02). Admins are seeded. */
 export const SignupRoleSchema = z.enum(["tenant", "landlord"]);
 export type SignupRole = z.infer<typeof SignupRoleSchema>;
 

@@ -2,7 +2,6 @@
 
 import { Search, Sparkles, Scale, User as UserIcon } from "lucide-react";
 import { RoleNav, NotificationBell } from "./RoleNav";
-import { RoleModeSwitch } from "./RoleModeSwitch";
 
 const items = [
   { href: "/tenant", label: "تصفّح", Icon: Search },
@@ -12,16 +11,6 @@ const items = [
 ];
 
 /** Client wrapper so Lucide icon components never cross the RSC boundary. */
-export function TenantNav({ isDual }: { isDual: boolean }) {
-  return (
-    <RoleNav
-      items={items}
-      rightSlot={
-        <>
-          {isDual && <RoleModeSwitch />}
-          <NotificationBell />
-        </>
-      }
-    />
-  );
+export function TenantNav() {
+  return <RoleNav items={items} rightSlot={<NotificationBell />} />;
 }
