@@ -1,8 +1,8 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { Home, ScanFace, Clock, ChevronLeft } from "lucide-react";
-import { useAdminQueues } from "../hooks/useAdmin";
+import { Home, ScanFace, Clock, ChevronLeft, MessageSquare, HelpCircle } from "lucide-react";
+import { useAdminQueues, useReviewRequest, useReviewUserReview } from "../hooks/useAdmin";
 import { Skeleton } from "@/src/components/ui/Skeleton";
 import { EmptyState } from "@/src/components/ui/States";
 import { formatRelativeTime } from "@/src/utils/format";
@@ -36,6 +36,22 @@ export function AdminDashboard() {
           emptyText="لا توجد طلبات توثيق جديدة"
           hrefBase="/admin/users"
         />
+        <QueueColumn
+          title="طلبات سكن بانتظار المراجعة"
+          Icon={HelpCircle}
+          items={data?.requestQueue}
+          loading={isLoading}
+          emptyText="لا توجد طلبات سكن بانتظار المراجعة"
+          type="request"
+        />
+        <QueueColumn
+          title="تقييمات بانتظار المراجعة"
+          Icon={MessageSquare}
+          items={data?.reviewQueue}
+          loading={isLoading}
+          emptyText="لا توجد تقييمات بانتظار المراجعة"
+          type="review"
+        />
       </div>
     </div>
   );
@@ -48,13 +64,15 @@ function QueueColumn({
   loading,
   emptyText,
   hrefBase,
+  type,
 }: {
   title: string;
   Icon: typeof Home;
   items?: QueueItem[];
   loading: boolean;
   emptyText: string;
-  hrefBase: string;
+  hrefBase?: string;
+  type?: "request" | "review";
 }) {
   const router = useRouter();
   return (
@@ -76,31 +94,90 @@ function QueueColumn({
       ) : !items || items.length === 0 ? (
         <EmptyState Icon={Icon} title={emptyText} />
       ) : (
-        <ul className="flex flex-col gap-2">
+        <ul className="flex flex-col gap-2.5">
           {items.map((item) => (
             <li key={item.id}>
-              <button
-                onClick={() => router.push(`${hrefBase}/${item.subjectId}`)}
-                className={cn(
-                  "flex w-full items-center justify-between gap-2 rounded-control border border-hairline p-3 text-start",
-                  "hover:border-primary hover:bg-primary-tint/30",
-                  "animate-[queue-slide-in_.5s_ease-out]",
-                )}
-              >
-                <div className="min-w-0">
-                  <p className="truncate text-small font-bold text-ink">{item.title}</p>
-                  <p className="truncate text-caption text-muted">{item.subtitle}</p>
-                </div>
-                <span className="flex shrink-0 items-center gap-1 text-caption text-muted">
-                  <Clock className="size-3" aria-hidden />
-                  {formatRelativeTime(item.submittedAt)}
-                  <ChevronLeft className="size-4" aria-hidden />
-                </span>
-              </button>
+              {type && (type === "request" || type === "review") ? (
+                <ModeratableItem item={item} type={type} />
+              ) : (
+                <button
+                  onClick={() => router.push(`${hrefBase}/${item.subjectId}`)}
+                  className={cn(
+                    "flex w-full items-center justify-between gap-2 rounded-control border border-hairline p-3 text-start",
+                    "hover:border-primary hover:bg-primary-tint/30",
+                    "animate-[queue-slide-in_.5s_ease-out]",
+                  )}
+                >
+                  <div className="min-w-0">
+                    <p className="truncate text-small font-bold text-ink">{item.title}</p>
+                    <p className="truncate text-caption text-muted">{item.subtitle}</p>
+                  </div>
+                  <span className="flex shrink-0 items-center gap-1 text-caption text-muted">
+                    <Clock className="size-3" aria-hidden />
+                    {formatRelativeTime(item.submittedAt)}
+                    <ChevronLeft className="size-4" aria-hidden />
+                  </span>
+                </button>
+              )}
             </li>
           ))}
         </ul>
       )}
     </section>
+  );
+}
+
+function ModeratableItem({ item, type }: { item: QueueItem; type: "request" | "review" }) {
+  const requestReview = useReviewRequest(item.subjectId);
+  const reviewReview = useReviewUserReview(item.subjectId);
+
+  const handleApprove = () => {
+    if (type === "request") {
+      requestReview.mutate({ decision: { decision: "approve" } });
+    } else {
+      reviewReview.mutate({ decision: { decision: "approve" } });
+    }
+  };
+
+  const handleReject = () => {
+    const reason = prompt("سبب الرفض:") || "";
+    if (type === "request") {
+      requestReview.mutate({ decision: { decision: "reject", reason } });
+    } else {
+      reviewReview.mutate({ decision: { decision: "reject", reason } });
+    }
+  };
+
+  const isLoading = requestReview.isPending || reviewReview.isPending;
+
+  return (
+    <div className="flex flex-col gap-2 rounded-control border border-hairline p-3 animate-[queue-slide-in_.5s_ease-out]">
+      <div>
+        <p className="text-small font-bold text-ink">{item.title}</p>
+        <p className="text-caption text-muted leading-relaxed mt-1">{item.subtitle}</p>
+        <p className="text-caption text-muted mt-1.5 flex items-center gap-1">
+          <Clock className="size-3" aria-hidden />
+          {formatRelativeTime(item.submittedAt)}
+        </p>
+      </div>
+      <div className="flex gap-2 mt-1 pt-2 border-t border-hairline">
+        <button
+          type="button"
+          disabled={isLoading}
+          onClick={handleApprove}
+          className="flex-1 rounded-control bg-success px-2 py-1 text-caption font-bold text-white hover:bg-success/80 disabled:opacity-50"
+        >
+          قبول
+        </button>
+        <button
+          type="button"
+          disabled={isLoading}
+          onClick={handleReject}
+          className="flex-1 rounded-control border border-error px-2 py-1 text-caption font-bold text-error hover:bg-error-tint/30 disabled:opacity-50"
+        >
+          رفض
+        </button>
+      </div>
+    </div>
   );
 }

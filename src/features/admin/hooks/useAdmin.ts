@@ -68,3 +68,37 @@ export function useReviewKyc(userId: string) {
     onSettled: () => qc.invalidateQueries({ queryKey: ["admin", "queues"] }),
   });
 }
+
+export function useReviewRequest(requestId: string) {
+  const qc = useQueryClient();
+  return useMutation<{ ok: boolean }, { conflict: boolean; message: string }, ReviewVars>({
+    mutationFn: async ({ decision }) => {
+      try {
+        return await api.post<{ ok: boolean }>(`admin/requests/${requestId}/review`, decision);
+      } catch (e) {
+        throw {
+          conflict: isApiClientError(e) && e.statusCode === 409,
+          message: isApiClientError(e) ? e.message : "تعذر تنفيذ الإجراء",
+        };
+      }
+    },
+    onSettled: () => qc.invalidateQueries({ queryKey: ["admin", "queues"] }),
+  });
+}
+
+export function useReviewUserReview(reviewId: string) {
+  const qc = useQueryClient();
+  return useMutation<{ ok: boolean }, { conflict: boolean; message: string }, ReviewVars>({
+    mutationFn: async ({ decision }) => {
+      try {
+        return await api.post<{ ok: boolean }>(`admin/reviews/${reviewId}/review`, decision);
+      } catch (e) {
+        throw {
+          conflict: isApiClientError(e) && e.statusCode === 409,
+          message: isApiClientError(e) ? e.message : "تعذر تنفيذ الإجراء",
+        };
+      }
+    },
+    onSettled: () => qc.invalidateQueries({ queryKey: ["admin", "queues"] }),
+  });
+}

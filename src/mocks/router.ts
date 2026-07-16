@@ -547,23 +547,33 @@ export function dispatch(
     const myProps = db.properties.filter((p) => p.ownerId === user.id && p.status === "APPROVED");
     const items = db.tenantRequests
       .filter((r) => r.status === "APPROVED")
-      .map((r) => ({
-        id: r.id,
-        minBudget: r.minBudget,
-        maxBudget: r.maxBudget,
-        preferredLocations: r.preferredLocations,
-        propertyType: r.propertyType,
-        requiredBedrooms: r.requiredBedrooms,
-        needsFurnished: r.needsFurnished,
-        flexibilityScore: r.flexibilityScore,
-        lifestyleRequirements: r.lifestyleRequirements,
-        createdAt: r.createdAt,
-        // Tenant identity intentionally absent until they accept an offer.
-        matchScore: myProps.length
-          ? Math.max(...myProps.map((p) => scoreRequestAgainstProperty(r, p)))
-          : null,
-        alreadyOffered: db.offers.some((o) => o.tenantRequestId === r.id && o.ownerId === user.id),
-      }))
+      .map((r) => {
+        const scoredProps = myProps.map((p) => ({
+          property: p,
+          score: scoreRequestAgainstProperty(r, p),
+        }));
+        const best = scoredProps.length
+          ? scoredProps.reduce((best, curr) => (curr.score > best.score ? curr : best), scoredProps[0])
+          : null;
+
+        return {
+          id: r.id,
+          minBudget: r.minBudget,
+          maxBudget: r.maxBudget,
+          preferredLocations: r.preferredLocations,
+          propertyType: r.propertyType,
+          requiredBedrooms: r.requiredBedrooms,
+          needsFurnished: r.needsFurnished,
+          flexibilityScore: r.flexibilityScore,
+          lifestyleRequirements: r.lifestyleRequirements,
+          createdAt: r.createdAt,
+          matchScore: best ? best.score : null,
+          alreadyOffered: db.offers.some((o) => o.tenantRequestId === r.id && o.ownerId === user.id),
+          bestMatchingProperty: best
+            ? { id: best.property.id, title: best.property.title }
+            : null,
+        };
+      })
       .sort((a, b) => (b.matchScore ?? 0) - (a.matchScore ?? 0));
     return ok({ items });
   }

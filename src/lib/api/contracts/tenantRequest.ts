@@ -85,5 +85,12 @@ export const BrowsableTenantRequestSchema = z.object({
   matchScore: z.number().min(0).max(100).nullable(),
   /** True once this landlord has already offered on this request. */
   alreadyOffered: z.boolean(),
+  bestMatchingProperty: z
+    .object({
+      id: z.string(),
+      title: z.string(),
+    })
+    .nullable()
+    .optional(),
 });
 export type BrowsableTenantRequest = z.infer<typeof BrowsableTenantRequestSchema>;
