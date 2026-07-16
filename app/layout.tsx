@@ -23,7 +23,7 @@ export default async function RootLayout({
   const messages = await getMessages();
 
   return (
-    <html lang="ar" dir="rtl" className={`${cairo.variable} h-full antialiased`}>
+    <html lang="ar" dir="rtl" className={`${cairo.variable} h-full antialiased`} suppressHydrationWarning>
       <body className="min-h-full flex flex-col bg-background text-ink font-sans">
         <NextIntlClientProvider locale="ar" messages={messages}>
           <Providers>{children}</Providers>
