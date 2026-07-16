@@ -116,22 +116,24 @@ export function SendOfferSheet({ request, onClose }: SendOfferSheetProps) {
                   required
                   placeholder="— اختر عقارًا —"
                   value={propertyId}
-                  onChange={(e) => setPropertyId(e.target.value)}
+                  onChange={(e) => {
+                    const selectedId = e.target.value;
+                    setPropertyId(selectedId);
+                    const chosen = offerable.find((p) => p.id === selectedId);
+                    if (chosen) {
+                      setProposedPrice(chosen.rentAmount.toString());
+                    } else {
+                      setProposedPrice("");
+                    }
+                  }}
                   error={errors.propertyId}
-                  options={offerable.map((p) => ({
-                    value: p.id,
-                    label: `${p.title} · ${formatEGP(p.rentAmount)}`,
-                  }))}
-                />
-                <InputField
-                  label="السعر المقترح (ج.م / شهريًا)"
-                  type="number"
-                  inputMode="numeric"
-                  required
-                  value={proposedPrice}
-                  onChange={(e) => setProposedPrice(e.target.value)}
-                  error={errors.proposedPrice}
-                  hint="يمكنك اقتراح سعر مختلف عن سعر الإعلان لهذا المستأجر."
+                  options={offerable.map((p) => {
+                    const pct = calculateMatchScore(request, p);
+                    return {
+                      value: p.id,
+                      label: `${p.title} · ${formatEGP(p.rentAmount)} (${pct}%)`,
+                    };
+                  })}
                 />
                 <TextAreaField
                   label="رسالتك للمستأجر"
@@ -166,4 +168,23 @@ export function SendOfferSheet({ request, onClose }: SendOfferSheetProps) {
       />
     </>
   );
+}
+
+function calculateMatchScore(r: BrowsableTenantRequest, p: any): number {
+  let score = 50;
+  if (p.rentAmount >= r.minBudget && p.rentAmount <= r.maxBudget) score += 18;
+  else score -= 22;
+  const district = p.district || "";
+  if (r.preferredLocations.includes(district)) score += 12;
+  if (p.propertyType === r.propertyType) score += 8;
+  if (p.bedrooms >= r.requiredBedrooms) score += 5;
+  if (!r.needsFurnished || p.isFurnished) score += 5;
+  if (p.description) {
+    const words = r.lifestyleRequirements.split(/\s+/).filter((w) => w.length > 3);
+    const haystack = `${p.description || ""} ${p.propertyAroundServices || ""}`;
+    score += Math.min(10, words.filter((w) => haystack.includes(w)).length * 2);
+  }
+  score += Math.round((r.flexibilityScore - 5) * 0.6);
+  if (p.isBoosted) score += 2;
+  return Math.max(5, Math.min(98, Math.round(score)));
 }
