@@ -1,11 +1,12 @@
 "use client";
 
-import { LayoutDashboard, MessageSquare, User as UserIcon } from "lucide-react";
+import { LayoutDashboard, Users, Send, User as UserIcon } from "lucide-react";
 import { RoleNav, NotificationBell } from "./RoleNav";
 
 const items = [
   { href: "/landlord", label: "عقاراتي", Icon: LayoutDashboard },
-  { href: "/landlord/inquiries", label: "الطلبات", Icon: MessageSquare },
+  { href: "/landlord/requests", label: "طلبات المستأجرين", Icon: Users },
+  { href: "/landlord/offers", label: "عروضي", Icon: Send },
   { href: "/profile", label: "حسابي", Icon: UserIcon },
 ];
 

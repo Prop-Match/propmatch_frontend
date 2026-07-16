@@ -70,7 +70,7 @@ export function AddPropertyWizard() {
           toast("info", "وثّق هويتك أولًا لنشر إعلانك");
           router.push("/landlord/verify");
         } else if (e.code === "QUOTA_EXHAUSTED") {
-          setPaywall((e.paymentType as PaymentType) ?? "NEW_LISTING");
+          setPaywall(e.paymentType ?? "NEW_LISTING");
         } else {
           toast("error", e.message);
         }

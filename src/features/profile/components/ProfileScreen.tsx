@@ -51,7 +51,7 @@ export function ProfileScreen() {
           before publishing a listing/request, accepting an offer, or revealing
           contact. Admins don't need it. */}
       {user.verificationStatus !== "APPROVED" && user.role !== "admin" && (
-        <Link href="/landlord/verify" className="flex items-center gap-3 rounded-card border border-pending/30 bg-pending-tint px-4 py-3">
+        <Link href="/verify" className="flex items-center gap-3 rounded-card border border-pending/30 bg-pending-tint px-4 py-3">
           <ShieldAlert className="size-5 text-pending" aria-hidden />
           <span className="flex-1 text-small font-semibold text-pending">وثّق حسابك لتفعيل كل المزايا</span>
           <span className="text-small text-pending">←</span>

@@ -1,7 +1,8 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api, isApiClientError } from "@/src/lib/api/browserClient";
+import { api } from "@/src/lib/api/browserClient";
+import { toActionError, type ActionError } from "@/src/lib/api/actionError";
 import type {
   CreatePropertyRequest,
   OptimizeDescriptionResponse,
@@ -29,24 +30,8 @@ export interface CreatePropertyResult {
   property: PropertyDetail;
 }
 
-/**
- * A domain error the UI must react to specifically rather than showing a
- * generic failure: VERIFICATION_REQUIRED → send to eKYC; QUOTA_EXHAUSTED →
- * open the paywall for `paymentType` (docs/analysis/rbac.md "gate composition").
- */
-export interface LandlordActionError {
-  code?: string;
-  paymentType?: string;
-  message: string;
-}
-
-function toActionError(e: unknown): LandlordActionError {
-  if (isApiClientError(e)) {
-    const body = e.body as { code?: string; paymentType?: string } | null;
-    return { code: body?.code, paymentType: body?.paymentType, message: e.message };
-  }
-  return { message: "تعذر إتمام العملية، حاول مرة أخرى" };
-}
+/** @deprecated Use `ActionError` from `@/src/lib/api/actionError` — same shape, shared with matching. */
+export type LandlordActionError = ActionError;
 
 export function useCreateProperty() {
   const qc = useQueryClient();

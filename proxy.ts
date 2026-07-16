@@ -10,7 +10,15 @@ import { ACCESS_TOKEN_COOKIE } from "@/src/lib/api/cookies";
  * layers".
  */
 
-const PROTECTED_PREFIXES = ["/admin", "/landlord", "/profile"];
+const PROTECTED_PREFIXES = [
+  "/admin",
+  "/landlord",
+  "/profile",
+  "/verify",
+  // Browsing (/tenant) stays open; the reverse-marketplace surfaces don't.
+  "/tenant/requests",
+  "/tenant/offers",
+];
 
 function decodeJwtExpiry(token: string): number | null {
   try {
@@ -41,5 +49,12 @@ export function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/admin/:path*", "/landlord/:path*", "/profile/:path*"],
+  matcher: [
+    "/admin/:path*",
+    "/landlord/:path*",
+    "/profile/:path*",
+    "/verify/:path*",
+    "/tenant/requests/:path*",
+    "/tenant/offers/:path*",
+  ],
 };
