@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect } from "react";
 import { Scale, Send, MessageCircle } from "lucide-react";
-import { api } from "@/src/lib/api/browserClient";
+import { streamPost } from "@/src/lib/api/browserClient";
 import { cn } from "@/src/utils/cn";
 import type { ChatMessage } from "@/src/lib/api/contracts/support";
 
@@ -24,18 +24,47 @@ export function LegalChatbot() {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
   }, [messages, typing]);
 
+  /**
+   * PRO-17: the answer streams in. The assistant bubble is appended empty and
+   * filled token by token, so `typing` only covers the wait before the first
+   * token — after that the growing text is the progress indicator.
+   */
   async function send(text: string) {
     const trimmed = text.trim();
     if (!trimmed || typing) return;
     setInput("");
-    setMessages((m) => [...m, { id: `local_${localId++}`, role: "user", content: trimmed }]);
+
+    const replyId = `local_${localId++}`;
+    setMessages((m) => [
+      ...m,
+      { id: `local_${localId++}`, role: "user", content: trimmed },
+    ]);
     setTyping(true);
+
+    let started = false;
     try {
-      const reply = await api.post<ChatMessage>("legal-chat", { message: trimmed });
-      setMessages((m) => [...m, reply]);
+      const done = await streamPost(
+        "legal-chat/stream",
+        { message: trimmed },
+        {
+          onToken: (token) => {
+            if (!started) {
+              started = true;
+              setTyping(false);
+              setMessages((m) => [...m, { id: replyId, role: "assistant", content: "" }]);
+            }
+            setMessages((m) =>
+              m.map((msg) => (msg.id === replyId ? { ...msg, content: msg.content + token } : msg)),
+            );
+          },
+        },
+      );
+      // `declined` only arrives with the terminal chunk, so the off-topic
+      // styling is applied once the answer is complete (SRS 3.3).
+      setMessages((m) => m.map((msg) => (msg.id === replyId ? { ...msg, declined: done.declined } : msg)));
     } catch {
       setMessages((m) => [
-        ...m,
+        ...m.filter((msg) => msg.id !== replyId || msg.content),
         { id: `local_${localId++}`, role: "assistant", content: "تعذر الاتصال، حاول مرة أخرى." },
       ]);
     } finally {

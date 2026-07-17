@@ -129,26 +129,25 @@ ECONNREFUSED). The mock is a real server; the same `router.ts` also backs Jest.
 
 ## 7. State vs. the PRO backlog (see `docs/analysis/mvp.md` for detail)
 
-**Working:** PRO-02 auth (explicit Tenant/Landlord signup) · PRO-03 eKYC
-(national ID+selfie, ERD statuses) · PRO-04 property listing (ERD fields, 3
-types, PENDING default) · PRO-07/08 *partial* admin dashboard + property/eKYC
-review · PRO-10 optimizer · PRO-14 Paymob sheet · PRO-15 contract → print-PDF ·
-PRO-17 legal chat UI · PRO-18 quotas/paywalls.
+**Every buildable PRO ticket is now done.** PRO-02 auth · PRO-03 eKYC · PRO-04
+listing · PRO-05 tenant request · PRO-06 Socket.io realtime · PRO-07/08 all four
+moderation queues (capability-gated) · PRO-10 optimizer · PRO-11 hybrid search
+w/ filters · PRO-12/13 the reverse marketplace end to end · PRO-14 Paymob sheet ·
+PRO-15 contract → print-PDF · PRO-16 B2B opt-in · PRO-17 legal chat UI · PRO-18
+quotas/paywalls. Plus the ERD extras: `FAVORITE`, `PROPERTY_REVIEW` submit,
+`MATCH_CONNECTION` + phone reveal, and the `NOTIFICATION` bell.
 
-**Mock API exists but NO UI yet (Phase 3):**
-- **PRO-05** tenant request form → `POST /tenant/requests`
-- **PRO-13** landlord browses approved requests (`GET /landlord/requests`, with
-  match score) + **Send Offer** (`POST /landlord/offers`) + tenant offer inbox
-  (`GET /tenant/offers`, `.../view|accept|reject`) → accept returns owner name/
-  phone/address + creates the connection
-- **PRO-16** B2B opt-in → `POST /partner-leads`
-- Favorites (`/tenant/favorites`), review submit (`POST /reviews`),
-  notifications (`GET /notifications`), request+review moderation
-  (`POST /admin/requests|reviews/:id/review`) — all mocked, no UI.
+PRO-10 and PRO-17 now **stream** over SSE (`/legal-chat/stream`,
+`.../optimize-description/stream`). Gates run before the first token, so a
+quota-exhausted optimizer still returns a JSON 403 and opens the paywall.
 
-**Not built at all:** PRO-06 **Socket.io** realtime (currently polling) ·
-streamed AI (PRO-10/17) · PRO-19 deploy/E2E · backend PDF (`LEASE_CONTRACT`
-persisted).
+**Not built, and none are purely frontend work:**
+- **PRO-15 backend PDF** + persisted `LEASE_CONTRACT` — *backend-owned.*
+- **PRO-19 deploy + E2E** — needs a Vercel project and credentials.
+
+**Out-of-backlog surfaces** (restored per `conflicts.md` B2-R): admin team/RBAC,
+audit log + login history, support ticketing. **These have no ERD entity and no
+backend** — see the risk note in §2.
 
 ## 8. Run it
 
@@ -166,7 +165,13 @@ Seeded logins (any password ≥ 8 chars, e.g. `password123`):
 | `tenant2@example.com` | tenant | eKYC APPROVED, owns approved request `req_1` |
 | `landlord@example.com` | landlord | eKYC APPROVED, owns `prop_1/2/5` |
 | `landlord2@example.com` | landlord | eKYC **PENDING** (sits in admin queue) |
-| `admin@example.com` | admin | flat ADMIN, all capabilities |
+| `admin@example.com` | admin | **super-admin** — all 13 capabilities |
+| `kyc@example.com` | admin | **kyc-reviewer** — eKYC queue only |
+| `support@example.com` | admin | **customer-support** — tickets only |
+| `readonly@example.com` | admin | **read-only** — no capabilities (use to test the gate) |
+
+> Admin sub-roles are restored per `conflicts.md` **B2-R** and have no ERD
+> entity or backend — see `ASSUMPTIONS.md` #26 before building on them.
 
 Seeded moderation queue: `prop_5` (PENDING), `landlord2` eKYC (PENDING),
 `req_2` (PENDING), `rev_2` (PENDING).
@@ -176,15 +181,26 @@ Verify with: `npx tsc --noEmit && npx eslint . && npx jest && npx next build`.
 **The user asked NOT to use the Claude Browser pane for testing right now** —
 verify via tsc/eslint/jest/build and Node/API-level checks instead.
 
-## 9. Recommended next step — Phase 3
+## 9. Recommended next step
 
-Build the **reverse-marketplace vertical slice** first (PRO-05 → 13 → 16): it's
-the differentiator, the highest-risk integration, and it exercises quota + the
-PII gate + notifications together. Then: 4 moderation queues (PRO-08 remainder)
-→ Socket.io (PRO-06) → favorites/reviews → streamed AI → deploy (PRO-19).
+**The frontend is complete.** Every buildable PRO ticket is done. What's left is
+not more building:
 
-The mock API for all of it already exists — read `src/mocks/router.ts` for the
-exact request/response shapes, and `src/lib/api/contracts/*` for the types.
+1. **Unblock the backend contracts — highest priority, not a coding task.**
+   Three things this repo invented need the backend team to accept or reject:
+   - The **restored admin surfaces** (`ASSUMPTIONS.md` #26) — no ERD entity, no
+     PRO ticket, no backend. They will 404 in production.
+   - The **socket handshake** (`ASSUMPTIONS.md` #28) — the gateway must
+     authenticate by httpOnly cookie, because this app never exposes the JWT to
+     client JS. Realtime won't connect otherwise.
+   - The **SSE framing + gate-before-token rule** for PRO-10/17 (`mvp.md`).
+2. **Deploy + E2E (PRO-19)** — needs a Vercel project and credentials.
+3. **PRO-15 backend PDF** — backend-owned.
+
+Work lives on the **`ali-dev`** branch (not `main`, not `dev`). Note `origin/dev`
+has moved ahead and the team built *inline* request/review moderation that
+collides with this branch's dedicated moderation pages — `AdminDashboard.tsx`
+and `useAdmin.ts` conflict and need a human decision, not an auto-merge.
 
 ## 10. Working agreement
 

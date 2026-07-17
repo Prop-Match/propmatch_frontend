@@ -1,16 +1,70 @@
 "use client";
 
+import { useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Home, ScanFace, Clock, ChevronLeft, MessageSquare, HelpCircle } from "lucide-react";
-import { useAdminQueues, useReviewRequest, useReviewUserReview } from "../hooks/useAdmin";
+import { Home, ScanFace, Clock, ChevronLeft, FileText, Star, ShieldAlert } from "lucide-react";
+import { useAdminQueues, useModerateReview, useReviewTenantRequest } from "../hooks/useAdmin";
+import { useAdminSession } from "../hooks/useTeam";
+import { InputField } from "@/src/components/ui/Field";
 import { Skeleton } from "@/src/components/ui/Skeleton";
 import { EmptyState } from "@/src/components/ui/States";
+import { useToast } from "@/src/components/ui/Toast";
 import { formatRelativeTime } from "@/src/utils/format";
 import { cn } from "@/src/utils/cn";
 import type { QueueItem } from "@/src/lib/api/contracts/admin";
+import type { Capability } from "@/src/lib/api/contracts/common";
 
+/**
+ * All four PRO-08 queues: eKYC, properties, tenant requests, property reviews.
+ *
+ * Each column is capability-gated (sub-roles restored — conflicts.md B2-R), so
+ * a kyc-reviewer sees only the eKYC column. That is UX only; the backend's
+ * capability guard is what actually enforces it.
+ */
 export function AdminDashboard() {
   const { data, isLoading } = useAdminQueues();
+  const { data: session } = useAdminSession();
+  const caps = session?.capabilities ?? [];
+  const can = (c: Capability) => caps.includes(c);
+
+  const columns = [
+    {
+      cap: "property:approve" as Capability,
+      title: "عقارات بانتظار المراجعة",
+      Icon: Home,
+      items: data?.propertyQueue,
+      emptyText: "لا توجد عقارات بانتظار المراجعة",
+      hrefBase: "/admin/properties",
+    },
+    {
+      cap: "kyc:review" as Capability,
+      title: "مستخدمون بحاجة لمراجعة",
+      Icon: ScanFace,
+      items: data?.kycQueue,
+      emptyText: "لا توجد طلبات توثيق جديدة",
+      hrefBase: "/admin/users",
+    },
+    {
+      cap: "request:approve" as Capability,
+      title: "طلبات سكن بانتظار النشر",
+      Icon: FileText,
+      items: data?.requestQueue,
+      emptyText: "لا توجد طلبات سكن جديدة",
+      hrefBase: "/admin/requests",
+      // Inline decide + a link through to the full read (PRO-08).
+      type: "request" as const,
+    },
+    {
+      cap: "review:moderate" as Capability,
+      title: "تقييمات بانتظار المراجعة",
+      Icon: Star,
+      items: data?.reviewQueue,
+      emptyText: "لا توجد تقييمات جديدة",
+      hrefBase: "/admin/reviews",
+      type: "review" as const,
+    },
+  ].filter((c) => can(c.cap));
 
   return (
     <div className="flex flex-col gap-5">
@@ -19,40 +73,19 @@ export function AdminDashboard() {
         <p className="mt-1 text-small text-muted">تُحدَّث القائمة تلقائيًا فور وصول طلبات جديدة.</p>
       </div>
 
-      <div className="grid gap-5 lg:grid-cols-2">
-        <QueueColumn
-          title="عقارات بانتظار المراجعة"
-          Icon={Home}
-          items={data?.propertyQueue}
-          loading={isLoading}
-          emptyText="لا توجد عقارات بانتظار المراجعة"
-          hrefBase="/admin/properties"
+      {session && columns.length === 0 ? (
+        <EmptyState
+          Icon={ShieldAlert}
+          title="لا تملك صلاحية مراجعة أي طابور"
+          description={`دورك الحالي «${session.roleName}» للاطلاع فقط.`}
         />
-        <QueueColumn
-          title="مستخدمون بحاجة لمراجعة"
-          Icon={ScanFace}
-          items={data?.kycQueue}
-          loading={isLoading}
-          emptyText="لا توجد طلبات توثيق جديدة"
-          hrefBase="/admin/users"
-        />
-        <QueueColumn
-          title="طلبات سكن بانتظار المراجعة"
-          Icon={HelpCircle}
-          items={data?.requestQueue}
-          loading={isLoading}
-          emptyText="لا توجد طلبات سكن بانتظار المراجعة"
-          type="request"
-        />
-        <QueueColumn
-          title="تقييمات بانتظار المراجعة"
-          Icon={MessageSquare}
-          items={data?.reviewQueue}
-          loading={isLoading}
-          emptyText="لا توجد تقييمات بانتظار المراجعة"
-          type="review"
-        />
-      </div>
+      ) : (
+        <div className="grid gap-5 lg:grid-cols-2">
+          {columns.map(({ cap, ...col }) => (
+            <QueueColumn key={cap} {...col} loading={isLoading} />
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -97,8 +130,8 @@ function QueueColumn({
         <ul className="flex flex-col gap-2.5">
           {items.map((item) => (
             <li key={item.id}>
-              {type && (type === "request" || type === "review") ? (
-                <ModeratableItem item={item} type={type} />
+              {type ? (
+                <ModeratableItem item={item} type={type} hrefBase={hrefBase} />
               ) : (
                 <button
                   onClick={() => router.push(`${hrefBase}/${item.subjectId}`)}
@@ -127,56 +160,123 @@ function QueueColumn({
   );
 }
 
-function ModeratableItem({ item, type }: { item: QueueItem; type: "request" | "review" }) {
-  const requestReview = useReviewRequest(item.subjectId);
-  const reviewReview = useReviewUserReview(item.subjectId);
+/**
+ * Decide from the queue, or open the full record first.
+ *
+ * The title links through to the detail page deliberately: the subtitle is
+ * truncated, and approving a tenant request publishes it to every verified
+ * landlord — the full free text is where PII the tenant typed gets caught
+ * (ASSUMPTIONS.md #20). Fast path for the obvious ones, full read when it
+ * matters.
+ */
+function ModeratableItem({
+  item,
+  type,
+  hrefBase,
+}: {
+  item: QueueItem;
+  type: "request" | "review";
+  hrefBase?: string;
+}) {
+  const toast = useToast();
+  // Both hooks must be called unconditionally (rules of hooks); only the one
+  // matching this queue is used.
+  const requestReview = useReviewTenantRequest(item.subjectId);
+  const reviewModeration = useModerateReview(item.subjectId);
+  const review = type === "request" ? requestReview : reviewModeration;
 
-  const handleApprove = () => {
-    if (type === "request") {
-      requestReview.mutate({ decision: { decision: "approve" } });
-    } else {
-      reviewReview.mutate({ decision: { decision: "approve" } });
-    }
-  };
+  const [rejecting, setRejecting] = useState(false);
+  const [reason, setReason] = useState("");
 
-  const handleReject = () => {
-    const reason = prompt("سبب الرفض:") || "";
-    if (type === "request") {
-      requestReview.mutate({ decision: { decision: "reject", reason } });
-    } else {
-      reviewReview.mutate({ decision: { decision: "reject", reason } });
-    }
-  };
-
-  const isLoading = requestReview.isPending || reviewReview.isPending;
+  function decide(decision: "approve" | "reject") {
+    review.mutate(
+      { decision: { decision, reason: decision === "reject" ? reason.trim() : undefined } },
+      {
+        onSuccess: () => {
+          toast("success", decision === "approve" ? "تمت الموافقة" : "تم الرفض");
+          setRejecting(false);
+          setReason("");
+        },
+        // 409 = someone else already moderated it; that's information, not failure.
+        onError: (e) => toast(e.conflict ? "info" : "error", e.message),
+      },
+    );
+  }
 
   return (
     <div className="flex flex-col gap-2 rounded-control border border-hairline p-3 animate-[queue-slide-in_.5s_ease-out]">
       <div>
-        <p className="text-small font-bold text-ink">{item.title}</p>
-        <p className="text-caption text-muted leading-relaxed mt-1">{item.subtitle}</p>
-        <p className="text-caption text-muted mt-1.5 flex items-center gap-1">
+        {hrefBase ? (
+          <Link
+            href={`${hrefBase}/${item.subjectId}`}
+            className="text-small font-bold text-ink hover:text-primary hover:underline"
+          >
+            {item.title}
+          </Link>
+        ) : (
+          <p className="text-small font-bold text-ink">{item.title}</p>
+        )}
+        <p className="mt-1 truncate text-caption leading-relaxed text-muted">{item.subtitle}</p>
+        <p className="mt-1.5 flex items-center gap-1 text-caption text-muted">
           <Clock className="size-3" aria-hidden />
           {formatRelativeTime(item.submittedAt)}
         </p>
       </div>
-      <div className="flex gap-2 mt-1 pt-2 border-t border-hairline">
-        <button
-          type="button"
-          disabled={isLoading}
-          onClick={handleApprove}
-          className="flex-1 rounded-control bg-success px-2 py-1 text-caption font-bold text-white hover:bg-success/80 disabled:opacity-50"
-        >
-          قبول
-        </button>
-        <button
-          type="button"
-          disabled={isLoading}
-          onClick={handleReject}
-          className="flex-1 rounded-control border border-error px-2 py-1 text-caption font-bold text-error hover:bg-error-tint/30 disabled:opacity-50"
-        >
-          رفض
-        </button>
+
+      {rejecting && (
+        <InputField
+          aria-label="سبب الرفض"
+          placeholder="سبب الرفض (يظهر لصاحبه)…"
+          value={reason}
+          onChange={(e) => setReason(e.target.value)}
+          autoFocus
+        />
+      )}
+
+      <div className="mt-1 flex gap-2 border-t border-hairline pt-2">
+        {rejecting ? (
+          <>
+            <button
+              type="button"
+              // The backend 400s without a reason — don't let them try.
+              disabled={review.isPending || !reason.trim()}
+              onClick={() => decide("reject")}
+              className="flex-1 rounded-control bg-error px-2 py-1 text-caption font-bold text-white hover:bg-error/90 disabled:opacity-50"
+            >
+              تأكيد الرفض
+            </button>
+            <button
+              type="button"
+              disabled={review.isPending}
+              onClick={() => {
+                setRejecting(false);
+                setReason("");
+              }}
+              className="rounded-control px-2 py-1 text-caption font-bold text-muted hover:text-ink"
+            >
+              إلغاء
+            </button>
+          </>
+        ) : (
+          <>
+            <button
+              type="button"
+              disabled={review.isPending}
+              onClick={() => decide("approve")}
+              className="flex-1 rounded-control bg-success px-2 py-1 text-caption font-bold text-white hover:bg-success/80 disabled:opacity-50"
+            >
+              قبول
+            </button>
+            <button
+              type="button"
+              disabled={review.isPending}
+              onClick={() => setRejecting(true)}
+              className="flex-1 rounded-control border border-error px-2 py-1 text-caption font-bold text-error hover:bg-error-tint/30 disabled:opacity-50"
+            >
+              رفض
+            </button>
+          </>
+        )}
       </div>
     </div>
   );

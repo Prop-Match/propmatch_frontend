@@ -15,9 +15,10 @@ const PROTECTED_PREFIXES = [
   "/landlord",
   "/profile",
   "/verify",
-  // Browsing (/tenant) stays open; the reverse-marketplace surfaces don't.
+  // Browsing (/tenant) stays open; the tenant's own surfaces don't.
   "/tenant/requests",
   "/tenant/offers",
+  "/tenant/favorites",
 ];
 
 function decodeJwtExpiry(token: string): number | null {
@@ -56,5 +57,6 @@ export const config = {
     "/verify/:path*",
     "/tenant/requests/:path*",
     "/tenant/offers/:path*",
+    "/tenant/favorites/:path*",
   ],
 };

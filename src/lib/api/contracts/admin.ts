@@ -1,29 +1,82 @@
 import { z } from "zod";
-import { CapabilitySchema } from "./common";
+import { CapabilitySchema, ModerationStatusSchema, type Capability } from "./common";
+import { PropertyTypeSchema } from "./property";
+import { TenantRequestStatusSchema } from "./tenantRequest";
 
 /**
- * Admin moderation surface (PRO-07/08). V1 has a single flat ADMIN role — the
- * ERD has no admin-role entity and the backlog no admin-management ticket, so
- * the previous build's 7 sub-roles were removed (docs/analysis/conflicts.md
- * B2). Capabilities are still modelled so scoped admins (or the Later BROKER)
- * can be introduced without reworking call sites.
+ * Admin moderation surface (PRO-07/08) + admin management.
+ *
+ * Scoped admin sub-roles were deleted in Phase 2 as out-of-scope and restored
+ * by explicit request — see `docs/analysis/conflicts.md` B2-R. They have **no
+ * ERD entity and no PRO ticket**, so everything below the moderation queues is
+ * a frontend contract the NestJS team has not agreed to
+ * (`ASSUMPTIONS.md` #26).
+ *
+ * Roles are only bundles of capabilities; the UI and backend check
+ * capabilities, never role names (docs/analysis/rbac.md). That is what keeps
+ * the Later BROKER role addable without rework.
  */
 
-/** Every capability a V1 ADMIN holds. */
-export const ADMIN_CAPABILITIES = [
-  "property:approve",
-  "property:reject",
-  "kyc:review",
-  "request:approve",
-  "request:reject",
-  "review:moderate",
-  "payment:view",
-  "partner_lead:view",
-] as const;
+export const AdminRoleSchema = z.enum([
+  "super-admin",
+  "listings-manager",
+  "kyc-reviewer",
+  "finance-admin",
+  "reviews-manager",
+  "customer-support",
+  "read-only",
+]);
+export type AdminRole = z.infer<typeof AdminRoleSchema>;
+
+export const adminRoleLabels: Record<AdminRole, string> = {
+  "super-admin": "مشرف عام",
+  "listings-manager": "مدير العقارات",
+  "kyc-reviewer": "مراجع التوثيق",
+  "finance-admin": "مدير مالي",
+  "reviews-manager": "مدير التقييمات",
+  "customer-support": "دعم العملاء",
+  "read-only": "اطّلاع فقط",
+};
+
+/**
+ * Named roles → capability sets. Single source of truth for the mock backend
+ * and the admin-management UI.
+ *
+ * `pii:reveal` is deliberately absent (it existed pre-deletion): contact
+ * reveal is a per-connection gate, never a role grant — see `common.ts`.
+ */
+export const ROLE_CAPABILITIES: Record<AdminRole, Capability[]> = {
+  "super-admin": [
+    "property:approve",
+    "property:reject",
+    "kyc:review",
+    "request:approve",
+    "request:reject",
+    "review:moderate",
+    "payment:view",
+    "partner_lead:view",
+    "report:export",
+    "ticket:reply",
+    "audit:view",
+    "admin:create",
+    "admin:manage",
+  ],
+  "listings-manager": ["property:approve", "property:reject"],
+  "kyc-reviewer": ["kyc:review"],
+  "finance-admin": ["payment:view", "partner_lead:view", "report:export"],
+  "reviews-manager": ["review:moderate", "request:approve", "request:reject"],
+  "customer-support": ["ticket:reply"],
+  "read-only": [],
+};
+
+/** Every capability a super-admin holds — the seed admin's set. */
+export const ADMIN_CAPABILITIES = ROLE_CAPABILITIES["super-admin"];
 
 export const AdminSessionSchema = z.object({
   id: z.string(),
   fullName: z.string(),
+  role: AdminRoleSchema,
+  roleName: z.string(),
   capabilities: z.array(CapabilitySchema),
 });
 export type AdminSession = z.infer<typeof AdminSessionSchema>;
@@ -78,6 +131,43 @@ export const KycReviewDetailSchema = z.object({
 export type KycReviewDetail = z.infer<typeof KycReviewDetailSchema>;
 
 /**
+ * Tenant-request moderation detail (PRO-08). The admin *does* see the tenant's
+ * identity here — unlike a landlord browsing — because catching PII the tenant
+ * typed into the free-text fields is precisely what this screen is for
+ * (ASSUMPTIONS.md #20).
+ */
+export const AdminTenantRequestDetailSchema = z.object({
+  id: z.string(),
+  tenantName: z.string(),
+  tenantVerified: z.boolean(),
+  minBudget: z.number(),
+  maxBudget: z.number(),
+  preferredLocations: z.string(),
+  propertyType: PropertyTypeSchema,
+  requiredBedrooms: z.number(),
+  needsFurnished: z.boolean(),
+  flexibilityScore: z.number(),
+  lifestyleRequirements: z.string(),
+  status: TenantRequestStatusSchema,
+  rejectionReason: z.string().nullable(),
+  createdAt: z.string(),
+});
+export type AdminTenantRequestDetail = z.infer<typeof AdminTenantRequestDetailSchema>;
+
+/** Property-review moderation detail (PRO-08 / SRS 3.7). */
+export const AdminReviewDetailSchema = z.object({
+  id: z.string(),
+  reviewerName: z.string(),
+  propertyId: z.string(),
+  propertyTitle: z.string(),
+  rating: z.number().min(1).max(5),
+  comment: z.string(),
+  status: ModerationStatusSchema,
+  createdAt: z.string(),
+});
+export type AdminReviewDetail = z.infer<typeof AdminReviewDetailSchema>;
+
+/**
  * Admin records views (build prompt §8.13): Payment Records + Partner Lead
  * Records with Recharts stats. Sourced from PAYMENT_TRANSACTION /
  * PARTNER_LEAD — not a separate ERD entity.
@@ -93,3 +183,50 @@ export const AdminStatsSchema = z.object({
   moderationDistribution: z.array(z.object({ label: z.string(), value: z.number() })),
 });
 export type AdminStats = z.infer<typeof AdminStatsSchema>;
+
+/* ------------------------- admin & RBAC management ------------------------ */
+/* Restored per conflicts.md B2-R. No ERD entity backs any of this.           */
+
+export const AdminTeamMemberSchema = z.object({
+  id: z.string(),
+  fullName: z.string(),
+  email: z.string(),
+  role: AdminRoleSchema,
+  capabilities: z.array(CapabilitySchema),
+  disabled: z.boolean(),
+  lastLoginAt: z.string().nullable(),
+  createdAt: z.string(),
+});
+export type AdminTeamMember = z.infer<typeof AdminTeamMemberSchema>;
+
+export const CreateAdminRequestSchema = z.object({
+  fullName: z.string().min(2, "الاسم مطلوب"),
+  email: z.string().email("بريد إلكتروني غير صالح"),
+  role: AdminRoleSchema,
+});
+export type CreateAdminRequest = z.infer<typeof CreateAdminRequestSchema>;
+
+export const UpdateAdminRequestSchema = z.object({
+  role: AdminRoleSchema.optional(),
+  disabled: z.boolean().optional(),
+});
+export type UpdateAdminRequest = z.infer<typeof UpdateAdminRequestSchema>;
+
+/** Append-only record of sensitive admin actions. */
+export const AuditLogEntrySchema = z.object({
+  id: z.string(),
+  actorName: z.string(),
+  action: z.string(),
+  subjectId: z.string(),
+  at: z.string(),
+});
+export type AuditLogEntry = z.infer<typeof AuditLogEntrySchema>;
+
+export const LoginHistoryEntrySchema = z.object({
+  id: z.string(),
+  adminName: z.string(),
+  ip: z.string(),
+  at: z.string(),
+  success: z.boolean(),
+});
+export type LoginHistoryEntry = z.infer<typeof LoginHistoryEntrySchema>;

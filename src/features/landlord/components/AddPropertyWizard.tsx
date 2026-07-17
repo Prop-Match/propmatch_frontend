@@ -4,9 +4,10 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useForm, Controller, type UseFormReturn } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { Sparkles, Check, ArrowLeft, ArrowRight } from "lucide-react";
+import { Sparkles, Check, ArrowLeft, ArrowRight, Undo2 } from "lucide-react";
 import { addPropertyFormSchema, stepFields, type AddPropertyForm } from "../validation/schemas";
-import { useCreateProperty, useOptimizeDescription, useQuota } from "../hooks/useLandlord";
+import { useCreateProperty, useQuota, useStreamOptimizeDescription } from "../hooks/useLandlord";
+import type { ActionError } from "@/src/lib/api/actionError";
 import { InputField, TextAreaField } from "@/src/components/ui/Field";
 import { ChipGroup } from "@/src/components/ui/Chip";
 import { Button } from "@/src/components/ui/Button";
@@ -215,29 +216,60 @@ function DetailsStep({ form: { register, formState: { errors } } }: StepProps) {
 
 function DescriptionStep({ form }: StepProps) {
   const toast = useToast();
-  const optimize = useOptimizeDescription();
+  const optimize = useStreamOptimizeDescription();
   const description = form.watch("description");
+  // PRO-10 says the landlord reviews the rewrite — so keep what they wrote and
+  // let them put it back. Streaming overwrites the field in place, which would
+  // otherwise destroy their draft with no way back.
+  const [previous, setPrevious] = useState<string | null>(null);
 
-  function runOptimize() {
-    optimize.mutate(description || "عقار للإيجار", {
-      onSuccess: (res) => {
-        // Never auto-publish: the landlord reviews the rewrite first (PRO-10).
-        form.setValue("description", res.optimized, { shouldValidate: true });
-        toast("success", `تم تحسين الوصف — المتبقي: ${res.optimizerUsesLeft}`);
-      },
-      onError: (e) =>
-        toast("error", e.code === "QUOTA_EXHAUSTED" ? "انتهت استخداماتك المجانية للتحسين" : e.message),
-    });
+  async function runOptimize() {
+    const original = description || "عقار للإيجار";
+    setPrevious(original);
+    try {
+      await optimize.run(original, (soFar) =>
+        form.setValue("description", soFar, { shouldValidate: false }),
+      );
+      form.trigger("description");
+      toast("success", "تم تحسين الوصف — راجعه قبل الإرسال");
+    } catch (e) {
+      const err = e as ActionError;
+      // Put their text back: a failed rewrite must not cost them their draft.
+      form.setValue("description", original, { shouldValidate: true });
+      setPrevious(null);
+      toast("error", err.code === "QUOTA_EXHAUSTED" ? "انتهت استخداماتك المجانية للتحسين" : err.message);
+    }
+  }
+
+  function undo() {
+    if (previous === null) return;
+    form.setValue("description", previous, { shouldValidate: true });
+    setPrevious(null);
   }
 
   return (
     <Card>
       <div className="flex items-center justify-between">
         <span className="text-small font-semibold text-ink">الوصف</span>
-        <Button type="button" variant="ghost" size="sm" onClick={runOptimize} loading={optimize.isPending}>
-          <Sparkles className="size-4" aria-hidden />
-          تحسين الوصف بالذكاء الاصطناعي
-        </Button>
+        <div className="flex items-center gap-1">
+          {previous !== null && !optimize.isStreaming && (
+            <Button type="button" variant="ghost" size="sm" onClick={undo}>
+              <Undo2 className="size-4" aria-hidden />
+              تراجع
+            </Button>
+          )}
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={runOptimize}
+            loading={optimize.isStreaming}
+            disabled={optimize.isStreaming}
+          >
+            <Sparkles className="size-4" aria-hidden />
+            تحسين الوصف بالذكاء الاصطناعي
+          </Button>
+        </div>
       </div>
       <TextAreaField
         placeholder="اكتب وصفًا للعقار…"
@@ -245,6 +277,12 @@ function DescriptionStep({ form }: StepProps) {
         error={form.formState.errors.description?.message}
         {...form.register("description")}
       />
+      {optimize.isStreaming && (
+        <p className="flex items-center gap-1.5 text-caption text-muted" role="status">
+          <Sparkles className="size-3.5 animate-pulse" aria-hidden />
+          جارٍ كتابة الوصف…
+        </p>
+      )}
       <TextAreaField
         label="الخدمات المحيطة"
         hint="تُستخدم في المطابقة الذكية — اذكر ما حول العقار (جامعة، مواصلات، أسواق…)."

@@ -1,11 +1,11 @@
 "use client";
 
+import { useCallback, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api } from "@/src/lib/api/browserClient";
+import { api, streamPost } from "@/src/lib/api/browserClient";
 import { toActionError, type ActionError } from "@/src/lib/api/actionError";
 import type {
   CreatePropertyRequest,
-  OptimizeDescriptionResponse,
   PropertyDetail,
   PropertySummary,
 } from "@/src/lib/api/contracts/property";
@@ -50,21 +50,46 @@ export function useCreateProperty() {
   });
 }
 
-export function useOptimizeDescription(propertyId = "draft") {
+/**
+ * PRO-10 streaming optimizer. Not a react-query mutation: the value arrives
+ * progressively, so the caller gets tokens as they land rather than one
+ * resolved payload.
+ *
+ * Gate errors (QUOTA_EXHAUSTED / VERIFICATION_REQUIRED) still arrive as a
+ * normal JSON error before the first token, so callers react exactly as they
+ * do for the buffered call.
+ */
+export function useStreamOptimizeDescription(propertyId = "draft") {
   const qc = useQueryClient();
-  return useMutation<OptimizeDescriptionResponse, LandlordActionError, string>({
-    mutationFn: async (description) => {
+  const [isStreaming, setIsStreaming] = useState(false);
+
+  const run = useCallback(
+    async (description: string, onToken: (soFar: string) => void): Promise<void> => {
+      setIsStreaming(true);
+      let text = "";
       try {
-        return await api.post<OptimizeDescriptionResponse>(
-          `landlord/properties/${propertyId}/optimize-description`,
+        await streamPost(
+          `landlord/properties/${propertyId}/optimize-description/stream`,
           { description },
+          {
+            onToken: (token) => {
+              text += token;
+              onToken(text);
+            },
+          },
         );
+        // The generation is spent server-side — refresh the counter.
+        qc.invalidateQueries({ queryKey: ["quota"] });
       } catch (e) {
         throw toActionError(e);
+      } finally {
+        setIsStreaming(false);
       }
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["quota"] }),
-  });
+    [propertyId, qc],
+  );
+
+  return { run, isStreaming };
 }
 
 export function useBoostProperty(propertyId: string) {

@@ -2,7 +2,15 @@
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, isApiClientError } from "@/src/lib/api/browserClient";
-import type { AdminQueuesResponse, AdminStats, KycReviewDetail, ReviewDecision } from "@/src/lib/api/contracts/admin";
+import { usePollWhileOffline } from "@/src/lib/socket/RealtimeProvider";
+import type {
+  AdminQueuesResponse,
+  AdminReviewDetail,
+  AdminStats,
+  AdminTenantRequestDetail,
+  KycReviewDetail,
+  ReviewDecision,
+} from "@/src/lib/api/contracts/admin";
 
 export function useAdminStats() {
   return useQuery({
@@ -12,15 +20,16 @@ export function useAdminStats() {
 }
 
 /**
- * Live queue via polling (design spec: WebSocket, degrade to polling — we ship
- * polling first per docs/analysis/mvp.md). refetchInterval gives the
- * auto-updating "feels live" behavior; the mock injects new items over time.
+ * Live queue (PRO-06). New items arrive over the socket and are pushed into
+ * this cache by `useRealtime`; polling is the documented fallback for when the
+ * socket is down (design spec: WebSocket, degrade to polling).
  */
 export function useAdminQueues() {
+  const refetchInterval = usePollWhileOffline(3000);
   return useQuery({
     queryKey: ["admin", "queues"],
     queryFn: () => api.get<AdminQueuesResponse>("admin/queues"),
-    refetchInterval: 3000,
+    refetchInterval,
   });
 }
 
@@ -69,12 +78,21 @@ export function useReviewKyc(userId: string) {
   });
 }
 
-export function useReviewRequest(requestId: string) {
+/* ---------------- tenant requests + reviews (PRO-08 remainder) ------------- */
+
+export function useAdminTenantRequest(id: string) {
+  return useQuery({
+    queryKey: ["admin", "request", id],
+    queryFn: () => api.get<AdminTenantRequestDetail>(`admin/requests/${id}`),
+  });
+}
+
+export function useReviewTenantRequest(id: string) {
   const qc = useQueryClient();
-  return useMutation<{ ok: boolean }, { conflict: boolean; message: string }, ReviewVars>({
+  return useMutation<{ status: string }, { conflict: boolean; message: string }, ReviewVars>({
     mutationFn: async ({ decision }) => {
       try {
-        return await api.post<{ ok: boolean }>(`admin/requests/${requestId}/review`, decision);
+        return await api.post<{ status: string }>(`admin/requests/${id}/review`, decision);
       } catch (e) {
         throw {
           conflict: isApiClientError(e) && e.statusCode === 409,
@@ -86,12 +104,19 @@ export function useReviewRequest(requestId: string) {
   });
 }
 
-export function useReviewUserReview(reviewId: string) {
+export function useAdminReview(id: string) {
+  return useQuery({
+    queryKey: ["admin", "review", id],
+    queryFn: () => api.get<AdminReviewDetail>(`admin/reviews/${id}`),
+  });
+}
+
+export function useModerateReview(id: string) {
   const qc = useQueryClient();
-  return useMutation<{ ok: boolean }, { conflict: boolean; message: string }, ReviewVars>({
+  return useMutation<{ status: string }, { conflict: boolean; message: string }, ReviewVars>({
     mutationFn: async ({ decision }) => {
       try {
-        return await api.post<{ ok: boolean }>(`admin/reviews/${reviewId}/review`, decision);
+        return await api.post<{ status: string }>(`admin/reviews/${id}/review`, decision);
       } catch (e) {
         throw {
           conflict: isApiClientError(e) && e.statusCode === 409,

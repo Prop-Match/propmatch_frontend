@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { Send } from "lucide-react";
 import { Sheet } from "@/src/components/ui/Sheet";
 import { Button } from "@/src/components/ui/Button";
-import { InputField, SelectField, TextAreaField } from "@/src/components/ui/Field";
+import { SelectField, TextAreaField } from "@/src/components/ui/Field";
 import { QuotaChip } from "@/src/components/ui/QuotaChip";
 import { EmptyState } from "@/src/components/ui/States";
 import { useToast } from "@/src/components/ui/Toast";
@@ -14,6 +14,7 @@ import { useMyProperties, useQuota } from "@/src/features/landlord/hooks/useLand
 import { formatEGP } from "@/src/utils/format";
 import { CreateOfferRequestSchema, type CreateOfferRequest } from "@/src/lib/api/contracts/offer";
 import type { BrowsableTenantRequest } from "@/src/lib/api/contracts/tenantRequest";
+import type { PropertySummary } from "@/src/lib/api/contracts/property";
 import type { PaymentType } from "@/src/lib/api/contracts/payment";
 import { useSendOffer } from "../hooks/useOffers";
 
@@ -170,20 +171,36 @@ export function SendOfferSheet({ request, onClose }: SendOfferSheetProps) {
   );
 }
 
-function calculateMatchScore(r: BrowsableTenantRequest, p: any): number {
+/**
+ * ⚠️ Client-side re-implementation of the server's matcher, powering the «N%»
+ * in the property dropdown.
+ *
+ * **This contradicts ASSUMPTIONS.md #7** ("match score is server-authoritative
+ * and volatile — never recomputed client-side"), and it cannot be made to
+ * agree with the server:
+ *
+ * - `PropertySummary` carries no `description` / `propertyAroundServices`, so
+ *   the semantic term (worth up to +10 server-side) is silently missing here.
+ *   The original `p: any` was hiding exactly that.
+ * - The server's arithmetic is itself only a placeholder for ChromaDB
+ *   embeddings (PRO-09/11). Once the real matcher lands, this function
+ *   reproduces none of it and the percentage becomes fiction.
+ *
+ * Kept as-is for now (behaviour unchanged) — the honest fix is a backend field
+ * giving per-property scores for a request, since `BrowsableTenantRequest.
+ * matchScore` is only the *best* score across the landlord's properties and
+ * can't populate a per-row dropdown. **[CONFIRM with backend]**
+ */
+function calculateMatchScore(r: BrowsableTenantRequest, p: PropertySummary): number {
   let score = 50;
   if (p.rentAmount >= r.minBudget && p.rentAmount <= r.maxBudget) score += 18;
   else score -= 22;
-  const district = p.district || "";
-  if (r.preferredLocations.includes(district)) score += 12;
+  if (r.preferredLocations.includes(p.district || "")) score += 12;
   if (p.propertyType === r.propertyType) score += 8;
   if (p.bedrooms >= r.requiredBedrooms) score += 5;
   if (!r.needsFurnished || p.isFurnished) score += 5;
-  if (p.description) {
-    const words = r.lifestyleRequirements.split(/\s+/).filter((w) => w.length > 3);
-    const haystack = `${p.description || ""} ${p.propertyAroundServices || ""}`;
-    score += Math.min(10, words.filter((w) => haystack.includes(w)).length * 2);
-  }
+  // The semantic term the server applies here is omitted: this payload has
+  // neither field to compute it from.
   score += Math.round((r.flexibilityScore - 5) * 0.6);
   if (p.isBoosted) score += 2;
   return Math.max(5, Math.min(98, Math.round(score)));
