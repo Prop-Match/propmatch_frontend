@@ -14,7 +14,7 @@ Legend: ✅ done · 🔶 exists but must be reworked to the ERD · ❌ not built
 | **PRO-03** Manual eKYC (National ID + Selfie → S3, status `PENDING`) | Upload wizard (ID front/back → selfie), submit → PENDING, statuses, resubmit on reject | 🔶 **rewrite to ERD** (currently license/proof-of-address + cooldown — `conflicts.md` B3) |
 | **PRO-04** Property listing form + CRUD, defaults `PENDING` | Multi-step form + multi-image upload, status chips | 🔶 **rewrite fields to ERD** (governorate/city/district/manual_address/property_around_services/has_parking; 3 types; `PROPERTY_IMAGE`) |
 | **PRO-05** Tenant request form, defaults `PENDING` | Request form (budget range, locations, type, bedrooms, furnished, flexibility_score, lifestyle_requirements) + draft save | ✅ form + `/tenant/requests` list (close, offer count, reject reason). **Draft save not built** — requests go straight to PENDING |
-| **PRO-06** Live admin notifications (Socket.io toasts) | Socket.io client, live toasts for new eKYC/property/request | ❌ (currently polling — must move to Socket.io) |
+| **PRO-06** Live admin notifications (Socket.io toasts) | Socket.io client, live toasts for new eKYC/property/request | ✅ gateway on the mock (cookie-auth handshake, `user:<id>` + `admins` rooms); client pushes into the query cache; polls only while disconnected. **Backend must match the handshake — ASSUMPTIONS #28** |
 | **PRO-07** Protected admin dashboard + pending tables | Protected routes, queues fetching PENDING entities | ✅ all 4 queues, each capability-gated |
 
 ## Sprint 2 — Moderation, vector DB, AI core
@@ -46,7 +46,7 @@ Legend: ✅ done · 🔶 exists but must be reworked to the ERD · ❌ not built
 | `FAVORITE` (tenant bookmarks) | ERD; prompt §8.7 | ✅ optimistic toggle on cards/detail + `/tenant/favorites` |
 | `PROPERTY_REVIEW` submit (1–5★ + comment → PENDING) | ERD; SRS 3.7; PRO-08 moderates it | ✅ submit sheet + public list w/ average & distribution |
 | `MATCH_CONNECTION` + **phone reveal** | ERD; SRS 3.4 | ✅ accept → CONNECTED → reveal, via `ContactRevealCard`; gate covered by `src/mocks/__tests__/reverseMarketplace.test.ts` |
-| `NOTIFICATION` bell w/ ERD `type` enum | ERD; PRO-06 | 🔶 sample data → real entity |
+| `NOTIFICATION` bell w/ ERD `type` enum | ERD; PRO-06 | ✅ real entity, live over socket, server-owned read state. *Was crashing:* it read `n.kind`/`n.at`, which the API never sends → undefined icon → "Element type is invalid" took down the whole nav for any user with a notification |
 | Admin **Payment Records** + **Partner Lead Records** (Recharts) | prompt §8.13 | 🔶 stats page exists; repoint to real entities |
 
 ## Build order (recommended)
@@ -57,11 +57,9 @@ Legend: ✅ done · 🔶 exists but must be reworked to the ERD · ❌ not built
    exercises quota + PII gate together.
 3. ~~4 moderation queues (PRO-08 remainder)~~ ✅ done — all four clear.
 4. ~~Favorites · reviews submit · PRO-11 filters~~ ✅ done.
-5. **Socket.io (PRO-06)** replacing polling — the last Sprint-1 ticket still
-   open, and the biggest remaining piece. Needs a websocket server in the mock
-   (`src/mocks/standalone.ts` is plain `node:http` today).
-6. Streamed AI (PRO-10/17) — needs a streaming endpoint; the mock returns whole
-   responses.
+5. ~~Socket.io (PRO-06)~~ ✅ done — Sprint 1 is now fully closed.
+6. **Streamed AI (PRO-10/17)** — the last buildable frontend ticket. Needs an
+   SSE/stream endpoint; the mock returns whole responses today.
 7. Backend PDF + persisted `LEASE_CONTRACT` (PRO-15) — *backend-owned.*
 8. Deploy + E2E (PRO-19) — needs a Vercel project and credentials.
 

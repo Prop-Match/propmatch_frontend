@@ -1,5 +1,6 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { dispatch } from "./router";
+import { attachMockSocket } from "./socket";
 
 /**
  * Real HTTP server standing in for the NestJS backend, served on the same
@@ -7,6 +8,8 @@ import { dispatch } from "./router";
  * unreliable for nested RSC → route-handler → backend calls inside Next.js),
  * a real server is reachable identically from every context. Started from
  * instrumentation.ts when API_MOCKING=enabled.
+ *
+ * Also hosts the PRO-06 Socket.io gateway on the same port — see ./socket.
  */
 
 function readBody(req: IncomingMessage): Promise<unknown> {
@@ -60,7 +63,8 @@ export function startMockServer(port: number) {
       console.error("[mock] backend error", e);
     }
   });
+  attachMockSocket(server);
   server.listen(port, () => {
-    console.log(`[mock] backend listening on http://localhost:${port}`);
+    console.log(`[mock] backend listening on http://localhost:${port} (+ socket.io)`);
   });
 }

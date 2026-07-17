@@ -4,6 +4,7 @@ import { useState } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ToastProvider } from "@/src/components/ui/Toast";
 import { isApiClientError } from "@/src/lib/api/browserClient";
+import { RealtimeProvider } from "@/src/lib/socket/RealtimeProvider";
 
 /**
  * Never retry a 4xx: 401/403/404 and the coded domain errors
@@ -33,8 +34,12 @@ export function Providers({ children }: { children: React.ReactNode }) {
   );
 
   return (
+    // RealtimeProvider sits inside QueryClientProvider — it writes socket
+    // events straight into the query cache (PRO-06).
     <QueryClientProvider client={queryClient}>
-      <ToastProvider>{children}</ToastProvider>
+      <RealtimeProvider>
+        <ToastProvider>{children}</ToastProvider>
+      </RealtimeProvider>
     </QueryClientProvider>
   );
 }

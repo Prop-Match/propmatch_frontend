@@ -11,6 +11,7 @@ import type { NotificationType } from "@/src/lib/api/contracts/notification";
 import type { Capability } from "@/src/lib/api/contracts/common";
 import { ROLE_CAPABILITIES, type AdminRole } from "@/src/lib/api/contracts/admin";
 import type { SupportAuthor, TicketStatus } from "@/src/lib/api/contracts/support";
+import { emitMockEvent } from "./events";
 
 /**
  * In-memory mock database standing in for the NestJS + PostgreSQL backend.
@@ -732,14 +733,16 @@ export function notify(
   message: string,
   link: string | null = null,
 ) {
-  db.notifications.unshift({
-    id: nextId("ntf"),
+  const id = nextId("ntf");
+  const createdAt = new Date().toISOString();
+  db.notifications.unshift({ id, userId, title, message, link, type, isRead: false, createdAt });
+  // PRO-06: push it to the recipient if a socket server is listening. The row
+  // is persisted either way — the socket is delivery, not storage, so a
+  // disconnected client catches up on its next GET /notifications.
+  // `userId` routes the event; it is not part of the client-facing payload.
+  emitMockEvent({
+    kind: "notification",
     userId,
-    title,
-    message,
-    link,
-    type,
-    isRead: false,
-    createdAt: new Date().toISOString(),
+    payload: { id, title, message, link, type, isRead: false, createdAt },
   });
 }

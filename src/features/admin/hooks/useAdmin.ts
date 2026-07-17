@@ -2,6 +2,7 @@
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, isApiClientError } from "@/src/lib/api/browserClient";
+import { usePollWhileOffline } from "@/src/lib/socket/RealtimeProvider";
 import type {
   AdminQueuesResponse,
   AdminReviewDetail,
@@ -19,15 +20,16 @@ export function useAdminStats() {
 }
 
 /**
- * Live queue via polling (design spec: WebSocket, degrade to polling — we ship
- * polling first per docs/analysis/mvp.md). refetchInterval gives the
- * auto-updating "feels live" behavior; the mock injects new items over time.
+ * Live queue (PRO-06). New items arrive over the socket and are pushed into
+ * this cache by `useRealtime`; polling is the documented fallback for when the
+ * socket is down (design spec: WebSocket, degrade to polling).
  */
 export function useAdminQueues() {
+  const refetchInterval = usePollWhileOffline(3000);
   return useQuery({
     queryKey: ["admin", "queues"],
     queryFn: () => api.get<AdminQueuesResponse>("admin/queues"),
-    refetchInterval: 3000,
+    refetchInterval,
   });
 }
 

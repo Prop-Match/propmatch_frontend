@@ -10,6 +10,7 @@ import type { CreateLeaseContract } from "@/src/lib/api/contracts/contract";
 import type {
   AdminRole,
   CreateAdminRequest,
+  QueueItem,
   ReviewDecision,
   UpdateAdminRequest,
 } from "@/src/lib/api/contracts/admin";
@@ -31,10 +32,13 @@ import {
   verificationStatusFor,
   type MockOffer,
   type MockProperty,
+  type MockReview,
   type MockTenantRequest,
   type MockTicket,
   type MockUser,
+  type MockVerification,
 } from "./db";
+import { emitMockEvent } from "./events";
 
 /**
  * Framework-agnostic mock backend mirroring the Final ERD + SRS. Given a
@@ -194,6 +198,52 @@ function offerToReceived(o: MockOffer, viewerId: string) {
 }
 
 /* --- projections for the restored, non-ERD admin surfaces (B2-R) --- */
+
+/* ------------------------- admin queue projections ------------------------ */
+/* One builder per queue, shared by GET /admin/queues and the PRO-06 socket
+ * push — otherwise the pushed item and the fetched item drift apart and the
+ * dashboard shows two different shapes for the same thing. */
+
+const kycQueueItem = (v: MockVerification): QueueItem => ({
+  id: `q_${v.id}`,
+  type: "kyc",
+  subjectId: v.userId,
+  title: db.users.find((u) => u.id === v.userId)?.fullName ?? "مستخدم",
+  subtitle: "مستخدم جديد بحاجة لمراجعة",
+  submittedAt: v.submittedAt,
+});
+
+const propertyQueueItem = (p: MockProperty): QueueItem => ({
+  id: `q_${p.id}`,
+  type: "property",
+  subjectId: p.id,
+  title: p.title,
+  subtitle: `${p.district} · ${p.rentAmount} ج.م/شهريًا`,
+  submittedAt: p.createdAt,
+});
+
+const requestQueueItem = (r: MockTenantRequest): QueueItem => ({
+  id: `q_${r.id}`,
+  type: "request",
+  subjectId: r.id,
+  title: `طلب سكن في ${r.preferredLocations}`,
+  subtitle: `${r.minBudget}–${r.maxBudget} ج.م`,
+  submittedAt: r.createdAt,
+});
+
+const reviewQueueItem = (r: MockReview): QueueItem => ({
+  id: `q_${r.id}`,
+  type: "review",
+  subjectId: r.id,
+  title: `تقييم ${r.rating}★`,
+  subtitle: r.comment.slice(0, 60),
+  submittedAt: r.createdAt,
+});
+
+/** PRO-06: announce a new moderation item to connected admins. */
+function announceQueueItem(item: QueueItem) {
+  emitMockEvent({ kind: "adminQueueItem", payload: item });
+}
 
 /**
  * The mock has no request context, so the IP is synthetic. The real backend
@@ -371,8 +421,9 @@ export function dispatch(
       existing.reviewedBy = null;
       existing.reviewedAt = null;
       existing.submittedAt = new Date().toISOString();
+      announceQueueItem(kycQueueItem(existing));
     } else {
-      db.verifications.push({
+      const created: MockVerification = {
         id: nextId("ekyc"),
         userId: user.id,
         nationalId: b.nationalId,
@@ -384,7 +435,9 @@ export function dispatch(
         rejectionReason: null,
         submittedAt: new Date().toISOString(),
         reviewedAt: null,
-      });
+      };
+      db.verifications.push(created);
+      announceQueueItem(kycQueueItem(created));
     }
     return ok();
   }
@@ -499,6 +552,7 @@ export function dispatch(
       createdAt: new Date().toISOString(),
     };
     db.reviews.push(review);
+    announceQueueItem(reviewQueueItem(review));
     notify(p.ownerId, "NEW_REVIEW_SUBMITTED", "تقييم جديد", "تم إرسال تقييم جديد لعقارك للمراجعة.");
     return ok({ id: review.id, status: review.status });
   }
@@ -556,6 +610,7 @@ export function dispatch(
       }),
     );
     quota.freeListingsLeft -= 1;
+    announceQueueItem(propertyQueueItem(property));
     return ok({ property: toDetail(property, user) });
   }
   if (seg[0] === "landlord" && seg[1] === "properties" && seg[3] === "optimize-description" && method === "POST") {
@@ -612,6 +667,7 @@ export function dispatch(
       updatedAt: new Date().toISOString(),
     };
     db.tenantRequests.push(request);
+    announceQueueItem(requestQueueItem(request));
     return ok({ ...request, offersCount: 0 });
   }
   if (seg[0] === "tenant" && seg[1] === "requests" && seg[3] === "close" && method === "POST") {
@@ -945,46 +1001,10 @@ export function dispatch(
   if (path === "/admin/queues" && method === "GET") {
     const denied = requireAdmin();
     if (denied) return denied;
-    const kycQueue = db.verifications
-      .filter((v) => v.status === "PENDING")
-      .map((v) => ({
-        id: `q_${v.id}`,
-        type: "kyc" as const,
-        subjectId: v.userId,
-        title: db.users.find((u) => u.id === v.userId)?.fullName ?? "مستخدم",
-        subtitle: "مستخدم جديد بحاجة لمراجعة",
-        submittedAt: v.submittedAt,
-      }));
-    const propertyQueue = db.properties
-      .filter((p) => p.status === "PENDING")
-      .map((p) => ({
-        id: `q_${p.id}`,
-        type: "property" as const,
-        subjectId: p.id,
-        title: p.title,
-        subtitle: `${p.district} · ${p.rentAmount} ج.م/شهريًا`,
-        submittedAt: p.createdAt,
-      }));
-    const requestQueue = db.tenantRequests
-      .filter((r) => r.status === "PENDING")
-      .map((r) => ({
-        id: `q_${r.id}`,
-        type: "request" as const,
-        subjectId: r.id,
-        title: `طلب سكن في ${r.preferredLocations}`,
-        subtitle: `${r.minBudget}–${r.maxBudget} ج.م`,
-        submittedAt: r.createdAt,
-      }));
-    const reviewQueue = db.reviews
-      .filter((r) => r.status === "PENDING")
-      .map((r) => ({
-        id: `q_${r.id}`,
-        type: "review" as const,
-        subjectId: r.id,
-        title: `تقييم ${r.rating}★`,
-        subtitle: r.comment.slice(0, 60),
-        submittedAt: r.createdAt,
-      }));
+    const kycQueue = db.verifications.filter((v) => v.status === "PENDING").map(kycQueueItem);
+    const propertyQueue = db.properties.filter((p) => p.status === "PENDING").map(propertyQueueItem);
+    const requestQueue = db.tenantRequests.filter((r) => r.status === "PENDING").map(requestQueueItem);
+    const reviewQueue = db.reviews.filter((r) => r.status === "PENDING").map(reviewQueueItem);
     return ok({ kycQueue, propertyQueue, requestQueue, reviewQueue });
   }
   if (seg[0] === "admin" && seg[1] === "kyc" && seg.length === 3 && method === "GET") {

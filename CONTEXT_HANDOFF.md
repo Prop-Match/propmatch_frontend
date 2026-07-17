@@ -129,26 +129,23 @@ ECONNREFUSED). The mock is a real server; the same `router.ts` also backs Jest.
 
 ## 7. State vs. the PRO backlog (see `docs/analysis/mvp.md` for detail)
 
-**Working:** PRO-02 auth (explicit Tenant/Landlord signup) · PRO-03 eKYC
-(national ID+selfie, ERD statuses) · PRO-04 property listing (ERD fields, 3
-types, PENDING default) · PRO-07/08 *partial* admin dashboard + property/eKYC
-review · PRO-10 optimizer · PRO-14 Paymob sheet · PRO-15 contract → print-PDF ·
-PRO-17 legal chat UI · PRO-18 quotas/paywalls.
+**Every buildable PRO ticket is now done.** PRO-02 auth · PRO-03 eKYC · PRO-04
+listing · PRO-05 tenant request · PRO-06 Socket.io realtime · PRO-07/08 all four
+moderation queues (capability-gated) · PRO-10 optimizer · PRO-11 hybrid search
+w/ filters · PRO-12/13 the reverse marketplace end to end · PRO-14 Paymob sheet ·
+PRO-15 contract → print-PDF · PRO-16 B2B opt-in · PRO-17 legal chat UI · PRO-18
+quotas/paywalls. Plus the ERD extras: `FAVORITE`, `PROPERTY_REVIEW` submit,
+`MATCH_CONNECTION` + phone reveal, and the `NOTIFICATION` bell.
 
-**Mock API exists but NO UI yet (Phase 3):**
-- **PRO-05** tenant request form → `POST /tenant/requests`
-- **PRO-13** landlord browses approved requests (`GET /landlord/requests`, with
-  match score) + **Send Offer** (`POST /landlord/offers`) + tenant offer inbox
-  (`GET /tenant/offers`, `.../view|accept|reject`) → accept returns owner name/
-  phone/address + creates the connection
-- **PRO-16** B2B opt-in → `POST /partner-leads`
-- Favorites (`/tenant/favorites`), review submit (`POST /reviews`),
-  notifications (`GET /notifications`), request+review moderation
-  (`POST /admin/requests|reviews/:id/review`) — all mocked, no UI.
+**Not built, and none are purely frontend work:**
+- **Streamed AI (PRO-10/17)** — the last buildable ticket. Needs an SSE/stream
+  endpoint; the mock returns whole responses.
+- **PRO-15 backend PDF** + persisted `LEASE_CONTRACT` — *backend-owned.*
+- **PRO-19 deploy + E2E** — needs a Vercel project and credentials.
 
-**Not built at all:** PRO-06 **Socket.io** realtime (currently polling) ·
-streamed AI (PRO-10/17) · PRO-19 deploy/E2E · backend PDF (`LEASE_CONTRACT`
-persisted).
+**Out-of-backlog surfaces** (restored per `conflicts.md` B2-R): admin team/RBAC,
+audit log + login history, support ticketing. **These have no ERD entity and no
+backend** — see the risk note in §2.
 
 ## 8. Run it
 
@@ -182,15 +179,21 @@ Verify with: `npx tsc --noEmit && npx eslint . && npx jest && npx next build`.
 **The user asked NOT to use the Claude Browser pane for testing right now** —
 verify via tsc/eslint/jest/build and Node/API-level checks instead.
 
-## 9. Recommended next step — Phase 3
+## 9. Recommended next step
 
-Build the **reverse-marketplace vertical slice** first (PRO-05 → 13 → 16): it's
-the differentiator, the highest-risk integration, and it exercises quota + the
-PII gate + notifications together. Then: 4 moderation queues (PRO-08 remainder)
-→ Socket.io (PRO-06) → favorites/reviews → streamed AI → deploy (PRO-19).
+The feature backlog is done. What's left is **not** more building:
 
-The mock API for all of it already exists — read `src/mocks/router.ts` for the
-exact request/response shapes, and `src/lib/api/contracts/*` for the types.
+1. **Unblock the backend contracts — highest priority, not a coding task.**
+   Two things this repo invented need the backend team to accept or reject:
+   - The **restored admin surfaces** (`ASSUMPTIONS.md` #26) — no ERD entity, no
+     PRO ticket, no backend. They will 404 in production.
+   - The **socket handshake** (`ASSUMPTIONS.md` #28) — the gateway must
+     authenticate by httpOnly cookie, because this app never exposes the JWT to
+     client JS. Realtime simply won't connect otherwise.
+2. **Streamed AI (PRO-10/17)** — the last buildable frontend ticket.
+3. **Deploy + E2E (PRO-19)** — needs a Vercel project and credentials.
+
+Work now lives on the **`ali-dev`** branch (not `main`, not `dev`).
 
 ## 10. Working agreement
 
