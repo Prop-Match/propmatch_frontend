@@ -176,7 +176,14 @@ Seeded logins (any password ≥ 8 chars, e.g. `password123`):
 Seeded moderation queue: `prop_5` (PENDING), `landlord2` eKYC (PENDING),
 `req_2` (PENDING), `rev_2` (PENDING).
 
-Verify with: `npx tsc --noEmit && npx eslint . && npx jest && npx next build`.
+Verify with **`npm run verify`** (typecheck → lint → tests → build). The same
+four run in CI (`.github/workflows/ci.yml`) on every PR, as parallel jobs so one
+failure doesn't mask the others.
+
+Note `npm run lint` is `eslint --max-warnings=0`: an unused import is what hid
+the `p: any` in `SendOfferSheet`, so warnings fail the build. CI pins Node 22 —
+deliberately *below* the 24 used locally, so accidental use of newer-Node APIs
+fails in CI rather than in production.
 
 **The user asked NOT to use the Claude Browser pane for testing right now** —
 verify via tsc/eslint/jest/build and Node/API-level checks instead.

@@ -32,12 +32,12 @@ Legend: ✅ done · 🔶 exists but must be reworked to the ERD · ❌ not built
 
 | Ticket | Frontend scope | Status |
 |---|---|---|
-| **PRO-14** Paymob iframe + webhook-driven quota | Payment sheet, 4 `payment_type`s, post-success quota poll | 🔶 exists; align `payment_type` enum (add `OFFER_PACK`), real iframe |
+| **PRO-14** Paymob iframe + webhook-driven quota | Payment sheet, 4 `payment_type`s, post-success quota poll | 🔶 sheet + all 4 `payment_type`s + quota poll done. **No real Paymob**: `iframeUrl` is null and the card form is a mock — no money can move. Needs the real iframe + Paymob credentials |
 | **PRO-15** Contract generator → PDF (merges eKYC data) | Form → HTML→PDF, auto-fill verified names/national IDs (with consent), download | 🔶 exists client-side; move to backend PDF + persist `LEASE_CONTRACT` |
 | **PRO-16** B2B lead gen (Moving/Insurance opt-in after acceptance) | Opt-in UI post-acceptance → `PARTNER_LEAD` | ✅ opt-in sheet fires on accept; explicit, nothing pre-ticked |
 | **PRO-17** Legal chatbot (RAG, off-topic decline) | Chat UI, **streamed**, graceful decline, `transfer_to_human_support` | ✅ streams token-by-token via SSE; decline flagged on the terminal chunk. Real RAG endpoint is backend-owned |
 | **PRO-18** Freemium enforcer (quota decrement + paywall modal at 0) | Quota chips, paywall modals, **feature-flagged** for free launch | 🔶 exists; align to `USER_QUOTA` fields |
-| **PRO-19** Deploy (Vercel) + responsive + E2E | Deploy, mobile-responsive, E2E | ❌ |
+| **PRO-19** Deploy (Vercel) + responsive + E2E | Deploy, mobile-responsive, E2E | 🔶 CI runs typecheck/lint/tests/build on every PR (`.github/workflows/ci.yml`). Deploy needs Vercel credentials; **no E2E tooling exists** |
 
 ## Also required by the ERD/SRS but not its own ticket
 
@@ -60,13 +60,21 @@ Legend: ✅ done · 🔶 exists but must be reworked to the ERD · ❌ not built
 5. ~~Socket.io (PRO-06)~~ ✅ done — Sprint 1 fully closed.
 6. ~~Streamed AI (PRO-10/17)~~ ✅ done.
 
-**The frontend backlog is empty.** What remains is not frontend work:
+**The feature backlog is empty. These are not features, and they matter more:**
 
-7. **Get the invented contracts accepted or rejected** (`ASSUMPTIONS.md` #26,
-   #28) — the restored admin surfaces and the socket handshake. Not a coding
-   task, and the highest risk in the repo.
-8. Backend PDF + persisted `LEASE_CONTRACT` (PRO-15) — *backend-owned.*
-9. Deploy + E2E (PRO-19) — needs a Vercel project and credentials.
+7. ~~CI~~ ✅ done — every PR now runs typecheck/lint/tests/build.
+8. **The paywall flag doesn't exist** (`ASSUMPTIONS.md` #10) — paywalls are
+   hard-on. A launch blocker if the free launch is real.
+9. **Test the UI, not the mock.** 9 of 10 feature modules have zero tests, and
+   most of the suite tests `src/mocks` — the code that gets *deleted* when the
+   real backend lands. The notification-bell crash survived every green run
+   until a test first rendered it.
+10. **Get the invented contracts accepted or rejected** — the restored admin
+    surfaces (#26), the socket handshake (#28), the SSE framing, and
+    per-property match scores. Not a coding task; the highest risk in the repo.
+11. **No real Paymob** (PRO-14) and **no real AI** — both are mocks.
+12. Backend PDF + `LEASE_CONTRACT` (PRO-15), vector pipeline (PRO-09) — *backend.*
+13. E2E + deploy (PRO-19) — no E2E tooling installed; deploy needs Vercel creds.
 
 ### Streaming contract the backend must serve (PRO-10/17)
 
