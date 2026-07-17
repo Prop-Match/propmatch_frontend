@@ -13,9 +13,15 @@ export interface PropertyCardProps {
   onClick?: () => void;
   matchScore?: number;
   className?: string;
+  /**
+   * Overlay control rendered top-end (e.g. the favorite toggle). A slot rather
+   * than a direct import: this is a shared primitive, and shared code must not
+   * depend on a feature (src/features/README.md).
+   */
+  actionSlot?: React.ReactNode;
 }
 
-export function PropertyCard({ property, onClick, matchScore, className }: PropertyCardProps) {
+export function PropertyCard({ property, onClick, matchScore, className, actionSlot }: PropertyCardProps) {
   const [imageFailed, setImageFailed] = useState(false);
 
   return (
@@ -56,6 +62,7 @@ export function PropertyCard({ property, onClick, matchScore, className }: Prope
             </span>
           )}
         </div>
+        {actionSlot && <div className="absolute top-2 end-2">{actionSlot}</div>}
         {matchScore !== undefined && (
           <div className="absolute bottom-2 end-2 rounded-card bg-surface/95 p-1 shadow-card">
             <MatchScoreRing score={matchScore} size={46} />

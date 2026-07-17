@@ -166,7 +166,13 @@ Seeded logins (any password ≥ 8 chars, e.g. `password123`):
 | `tenant2@example.com` | tenant | eKYC APPROVED, owns approved request `req_1` |
 | `landlord@example.com` | landlord | eKYC APPROVED, owns `prop_1/2/5` |
 | `landlord2@example.com` | landlord | eKYC **PENDING** (sits in admin queue) |
-| `admin@example.com` | admin | flat ADMIN, all capabilities |
+| `admin@example.com` | admin | **super-admin** — all 13 capabilities |
+| `kyc@example.com` | admin | **kyc-reviewer** — eKYC queue only |
+| `support@example.com` | admin | **customer-support** — tickets only |
+| `readonly@example.com` | admin | **read-only** — no capabilities (use to test the gate) |
+
+> Admin sub-roles are restored per `conflicts.md` **B2-R** and have no ERD
+> entity or backend — see `ASSUMPTIONS.md` #26 before building on them.
 
 Seeded moderation queue: `prop_5` (PENDING), `landlord2` eKYC (PENDING),
 `req_2` (PENDING), `rev_2` (PENDING).

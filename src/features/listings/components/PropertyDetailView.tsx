@@ -10,16 +10,23 @@ import { Skeleton } from "@/src/components/ui/Skeleton";
 import { ErrorState } from "@/src/components/ui/States";
 import { formatNumber } from "@/src/utils/format";
 import { propertyTypeLabels } from "@/src/lib/api/contracts/property";
+import { PropertyReviews } from "./PropertyReviews";
 
 export function PropertyDetailView({
   id,
   matchScore,
   hideContact,
+  showReviews,
+  favoriteSlot,
 }: {
   id: string;
   matchScore?: number;
   /** True when the owner/admin is viewing — no tenant contact panel. */
   hideContact?: boolean;
+  /** Tenant-facing only: the public reviews block (SRS 3.7). */
+  showReviews?: boolean;
+  /** Favorite toggle, injected by the tenant surface (see PropertyCard). */
+  favoriteSlot?: React.ReactNode;
 }) {
   const { data: p, isLoading, isError, refetch } = useProperty(id);
 
@@ -61,6 +68,7 @@ export function PropertyDetailView({
             )}
             {p.status !== "APPROVED" && <StatusChip status={p.status} />}
           </div>
+          {favoriteSlot && <div className="absolute top-3 end-3">{favoriteSlot}</div>}
           {matchScore !== undefined && (
             <div className="absolute bottom-3 end-3 rounded-card bg-surface/95 p-1.5 shadow-card">
               <MatchScoreRing score={matchScore} size={56} />
@@ -108,6 +116,8 @@ export function PropertyDetailView({
             <p className="leading-relaxed text-body text-body-text">{p.propertyAroundServices}</p>
           </section>
         )}
+
+        {showReviews && <PropertyReviews propertyId={id} />}
       </div>
 
       {!hideContact && (

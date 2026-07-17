@@ -15,16 +15,16 @@ Legend: ✅ done · 🔶 exists but must be reworked to the ERD · ❌ not built
 | **PRO-04** Property listing form + CRUD, defaults `PENDING` | Multi-step form + multi-image upload, status chips | 🔶 **rewrite fields to ERD** (governorate/city/district/manual_address/property_around_services/has_parking; 3 types; `PROPERTY_IMAGE`) |
 | **PRO-05** Tenant request form, defaults `PENDING` | Request form (budget range, locations, type, bedrooms, furnished, flexibility_score, lifestyle_requirements) + draft save | ✅ form + `/tenant/requests` list (close, offer count, reject reason). **Draft save not built** — requests go straight to PENDING |
 | **PRO-06** Live admin notifications (Socket.io toasts) | Socket.io client, live toasts for new eKYC/property/request | ❌ (currently polling — must move to Socket.io) |
-| **PRO-07** Protected admin dashboard + pending tables | Protected routes, queues fetching PENDING entities | 🔶 exists; extend to 4 queues (eKYC, property, **request**, **review**) |
+| **PRO-07** Protected admin dashboard + pending tables | Protected routes, queues fetching PENDING entities | ✅ all 4 queues, each capability-gated |
 
 ## Sprint 2 — Moderation, vector DB, AI core
 
 | Ticket | Frontend scope | Status |
 |---|---|---|
-| **PRO-08** Admin approve/reject (eKYC, properties, reviews, requests) | 4 moderation flows, reject-with-reason, rejected users prompted to re-upload, 409 handling | 🔶 property + eKYC exist; add **requests** + **reviews**; align to ERD |
+| **PRO-08** Admin approve/reject (eKYC, properties, reviews, requests) | 4 moderation flows, reject-with-reason, rejected users prompted to re-upload, 409 handling | ✅ all 4 via shared `ModerationBar`; reject demands a reason; 409 handled |
 | **PRO-09** Vector DB pipeline (embeddings on approval) | *Backend-owned.* Frontend: don't present semantic results as exhaustive | n/a (backend) |
 | **PRO-10** AI Form Optimizer (before/after, quota) | «تحسين الوصف» button, before/after, `optimizer_uses_left` counter, **streamed** | 🔶 exists; add streaming + ERD quota field |
-| **PRO-11** Hybrid search (SQL filters + semantic → match score) | *Backend-owned.* Frontend: filters UI + ranked results + score rings | 🔶 score ring exists; intake must become `TENANT_REQUEST` |
+| **PRO-11** Hybrid search (SQL filters + semantic → match score) | *Backend-owned.* Frontend: filters UI + ranked results + score rings | ✅ `SearchFilters` (city/type/rent/bedrooms/furnished) + free-text `q`; ranking left server-side |
 | **PRO-12** Reverse-marketplace API (offer → tenant request) | *Backend-owned.* | n/a (backend) |
 | **PRO-13** Matchmaker & Offers UI (tenant results, landlord request browsing, Send Offer form) | Landlord browses approved requests w/ match score; Send Offer (property + pitch + price); tenant results | ✅ `/landlord/requests` (scored, verification-gated), Send Offer sheet (quota + OFFER_PACK paywall), `/landlord/offers`, tenant inbox `/tenant/offers` w/ accept → reveal |
 
@@ -43,8 +43,8 @@ Legend: ✅ done · 🔶 exists but must be reworked to the ERD · ❌ not built
 
 | Item | Where | Status |
 |---|---|---|
-| `FAVORITE` (tenant bookmarks) | ERD; prompt §8.7 | ❌ |
-| `PROPERTY_REVIEW` submit (1–5★ + comment → PENDING) | ERD; SRS 3.7; PRO-08 moderates it | ❌ (submit side) |
+| `FAVORITE` (tenant bookmarks) | ERD; prompt §8.7 | ✅ optimistic toggle on cards/detail + `/tenant/favorites` |
+| `PROPERTY_REVIEW` submit (1–5★ + comment → PENDING) | ERD; SRS 3.7; PRO-08 moderates it | ✅ submit sheet + public list w/ average & distribution |
 | `MATCH_CONNECTION` + **phone reveal** | ERD; SRS 3.4 | ✅ accept → CONNECTED → reveal, via `ContactRevealCard`; gate covered by `src/mocks/__tests__/reverseMarketplace.test.ts` |
 | `NOTIFICATION` bell w/ ERD `type` enum | ERD; PRO-06 | 🔶 sample data → real entity |
 | Admin **Payment Records** + **Partner Lead Records** (Recharts) | prompt §8.13 | 🔶 stats page exists; repoint to real entities |
@@ -55,12 +55,23 @@ Legend: ✅ done · 🔶 exists but must be reworked to the ERD · ❌ not built
    rebuild the mock backend.~~ ✅ done.
 2. ~~**Vertical slice: reverse marketplace** (PRO-05 → 13 → 16)~~ ✅ done —
    exercises quota + PII gate together.
-3. **4 moderation queues (PRO-08 remainder)** — requests + reviews are mocked
-   and now have upstream UI producing them, but no admin surface to clear them.
-   *Next: `req_2`/`rev_2` sit in the seeded queue with nowhere to go.*
-4. Socket.io (PRO-06) replacing polling.
-5. Streamed AI (PRO-10/17) · backend PDF (PRO-15).
-6. Favorites · reviews submit · deploy (PRO-19).
+3. ~~4 moderation queues (PRO-08 remainder)~~ ✅ done — all four clear.
+4. ~~Favorites · reviews submit · PRO-11 filters~~ ✅ done.
+5. **Socket.io (PRO-06)** replacing polling — the last Sprint-1 ticket still
+   open, and the biggest remaining piece. Needs a websocket server in the mock
+   (`src/mocks/standalone.ts` is plain `node:http` today).
+6. Streamed AI (PRO-10/17) — needs a streaming endpoint; the mock returns whole
+   responses.
+7. Backend PDF + persisted `LEASE_CONTRACT` (PRO-15) — *backend-owned.*
+8. Deploy + E2E (PRO-19) — needs a Vercel project and credentials.
+
+## Out-of-backlog surfaces (restored — conflicts.md B2-R)
+
+| Surface | Status | Risk |
+|---|---|---|
+| Admin team/RBAC + 7 sub-roles (`/admin/team`) | ✅ built | **No ERD entity, no PRO ticket, no backend.** ASSUMPTIONS #26 |
+| Audit log + login history (`/admin/activity`) | ✅ built, fed by real actions | same |
+| Support ticketing (`/admin/support`) | ✅ admin side only | same; no customer half (ASSUMPTIONS #27) |
 
 ## Explicitly *Later* (documented, not built)
 

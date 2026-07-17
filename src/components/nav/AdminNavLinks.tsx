@@ -2,24 +2,45 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { ClipboardCheck, BarChart3 } from "lucide-react";
+import { ClipboardCheck, BarChart3, Headset, Users, ScrollText } from "lucide-react";
 import { cn } from "@/src/utils/cn";
+import { useAdminSession } from "@/src/features/admin/hooks/useTeam";
+import type { Capability } from "@/src/lib/api/contracts/common";
 
-/**
- * V1 admin nav. One flat ADMIN role holds every admin capability
- * (docs/analysis/conflicts.md B2), so there is nothing to gate here yet —
- * re-introduce capability filtering if scoped admins are added later.
- */
-const links = [
+interface AdminLink {
+  href: string;
+  label: string;
+  Icon: typeof ClipboardCheck;
+  exact: boolean;
+  /** Capability required to see this link; undefined = any admin. */
+  cap?: Capability;
+}
+
+const links: AdminLink[] = [
   { href: "/admin", label: "المراجعة", Icon: ClipboardCheck, exact: true },
-  { href: "/admin/reports", label: "السجلات", Icon: BarChart3, exact: false },
+  { href: "/admin/support", label: "الدعم", Icon: Headset, exact: false, cap: "ticket:reply" },
+  { href: "/admin/reports", label: "السجلات", Icon: BarChart3, exact: false, cap: "payment:view" },
+  { href: "/admin/team", label: "الفريق", Icon: Users, exact: false, cap: "admin:manage" },
+  { href: "/admin/activity", label: "السجل", Icon: ScrollText, exact: false, cap: "audit:view" },
 ];
 
+/**
+ * Capability-aware admin nav — scoped sub-roles restored per conflicts.md
+ * B2-R, so a kyc-reviewer no longer sees the team or support sections.
+ *
+ * Hiding a link is UX only; the backend's capability guard is authoritative
+ * (docs/analysis/rbac.md, "Enforcement layers").
+ */
 export function AdminNavLinks() {
   const pathname = usePathname();
+  const { data: session } = useAdminSession();
+  const caps = session?.capabilities ?? [];
+
+  const visible = links.filter((l) => !l.cap || caps.includes(l.cap));
+
   return (
     <nav className="hidden items-center gap-1 md:flex">
-      {links.map(({ href, label, Icon, exact }) => {
+      {visible.map(({ href, label, Icon, exact }) => {
         const active = exact ? pathname === href : pathname.startsWith(href);
         return (
           <Link

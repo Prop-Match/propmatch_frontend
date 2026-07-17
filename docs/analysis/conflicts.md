@@ -23,8 +23,27 @@ Every conflict between the ranked sources, plus its V1 resolution. Ranking:
 | # | Decision | Rationale |
 |---|---|---|
 | B1 | **Repo stays a single Next.js app** (contracts at `src/lib/api/contracts`), *not* the monorepo (`apps/web` + `packages/contracts`) the prompt specifies. | No second package exists yet (the NestJS backend is a separate repo). Migration cost buys nothing today; extraction is mechanical later. **Deviation from build prompt §3/§13 — logged deliberately.** |
-| B2 | **Deleted the modules that exist in neither the ERD nor PRO-01…19**: customer-support tickets + AI support chat, admin team/RBAC management UI, audit log, login history. | They were built against a previous, superseded prompt. They have no ERD entity and no backend counterpart. Recoverable from git history (see commit `90c1501`). |
+| B2 | ~~**Deleted the modules that exist in neither the ERD nor PRO-01…19**: customer-support tickets + AI support chat, admin team/RBAC management UI, audit log, login history.~~ **REVERSED — see B2-R.** | They were built against a previous, superseded prompt. They have no ERD entity and no backend counterpart. Recoverable from git history (see commit `90c1501`). |
+| **B2-R** | **Restored** the admin team/RBAC UI, audit log + login history, and support ticketing (from `90c1501`), on the product owner's explicit instruction. Scoped admin sub-roles come back with them, **reversing ASSUMPTIONS #19** (flat ADMIN). | The owner wants these surfaces in the product. **The B2 rationale still stands and is now a live risk, not a hypothetical:** none of this exists in the Final ERD or PRO-01…19, so the NestJS team is not building it. Everything here talks to mock endpoints this repo invented (`ASSUMPTIONS.md` #26) and will 404 against the real backend until the backend team agrees to the contracts in `contracts/admin.ts` + `contracts/support.ts`. **This needs to reach the backend team as a scope change, not a bug report.** |
 | B3 | **eKYC rewritten to the ERD.** | The previous session built a document model (`license`/`government_id`/`proof_of_address` + a 24h resubmit cooldown + listing-intent gate) per an earlier prompt. The ERD's `IDENTITY_VERIFICATION` (national_id, front/back, selfie; `PENDING/APPROVED/REJECTED`; `rejection_reason`; `reviewed_by`) is source-of-truth #1 and overrules it. |
+
+### B2-R details — what came back, and what deliberately did not
+
+| Restored | Adapted on the way back in |
+|---|---|
+| Admin team/RBAC UI (`/admin/team`) + 7 sub-roles | Old capability names remapped to the current ERD-aligned set (`listing:approve` → `property:approve`, `review:delete` → `review:moderate`). Every admin endpoint is now capability-gated, not merely `role === "admin"`. An admin cannot edit their own privileges (lock-out guard). |
+| Audit log + login history (`/admin/activity`) | Now fed by real actions: every moderation decision and team change appends via `audit()`, and admin logins (including **failed** ones) append to login history. Append-only — there is deliberately no write/delete route. Mock IP is synthetic; the real backend must record the true client IP. |
+| Support ticketing (`/admin/support`) | Admin side only — there is no customer-facing thread UI, so `SupportThread`/`SupportSendRequest` were **not** restored. No notification on reply either: `NOTIFICATION.type` is a verbatim ERD enum with no ticket member, and inventing one would diverge from source-of-truth #1. |
+
+**Deliberately NOT restored: the `pii:reveal` capability.** The pre-deletion
+`customer-support` role carried it. Contact reveal is a *per-connection*
+relationship gate (ACCEPTED offer / CONNECTED match) enforced by the backend
+omitting the fields — `ASSUMPTIONS.md` #8, `rbac.md`. Re-adding it as a
+capability would let a support admin unmask any owner's phone by role alone,
+which is precisely what the gate exists to prevent, and would break the
+guarantee `src/mocks/__tests__/reverseMarketplace.test.ts` pins. If support
+staff genuinely need contact data for their job, that needs its own decision
+and its own audit trail — not a silent capability grant.
 
 ### B3 details — what changed vs. what was built
 

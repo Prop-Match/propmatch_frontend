@@ -1,16 +1,63 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { Home, ScanFace, Clock, ChevronLeft } from "lucide-react";
+import { Home, ScanFace, Clock, ChevronLeft, FileText, Star, ShieldAlert } from "lucide-react";
 import { useAdminQueues } from "../hooks/useAdmin";
+import { useAdminSession } from "../hooks/useTeam";
 import { Skeleton } from "@/src/components/ui/Skeleton";
 import { EmptyState } from "@/src/components/ui/States";
 import { formatRelativeTime } from "@/src/utils/format";
 import { cn } from "@/src/utils/cn";
 import type { QueueItem } from "@/src/lib/api/contracts/admin";
+import type { Capability } from "@/src/lib/api/contracts/common";
 
+/**
+ * All four PRO-08 queues: eKYC, properties, tenant requests, property reviews.
+ *
+ * Each column is capability-gated (sub-roles restored — conflicts.md B2-R), so
+ * a kyc-reviewer sees only the eKYC column. That is UX only; the backend's
+ * capability guard is what actually enforces it.
+ */
 export function AdminDashboard() {
   const { data, isLoading } = useAdminQueues();
+  const { data: session } = useAdminSession();
+  const caps = session?.capabilities ?? [];
+  const can = (c: Capability) => caps.includes(c);
+
+  const columns = [
+    {
+      cap: "property:approve" as Capability,
+      title: "عقارات بانتظار المراجعة",
+      Icon: Home,
+      items: data?.propertyQueue,
+      emptyText: "لا توجد عقارات بانتظار المراجعة",
+      hrefBase: "/admin/properties",
+    },
+    {
+      cap: "kyc:review" as Capability,
+      title: "مستخدمون بحاجة لمراجعة",
+      Icon: ScanFace,
+      items: data?.kycQueue,
+      emptyText: "لا توجد طلبات توثيق جديدة",
+      hrefBase: "/admin/users",
+    },
+    {
+      cap: "request:approve" as Capability,
+      title: "طلبات سكن بانتظار النشر",
+      Icon: FileText,
+      items: data?.requestQueue,
+      emptyText: "لا توجد طلبات سكن جديدة",
+      hrefBase: "/admin/requests",
+    },
+    {
+      cap: "review:moderate" as Capability,
+      title: "تقييمات بانتظار المراجعة",
+      Icon: Star,
+      items: data?.reviewQueue,
+      emptyText: "لا توجد تقييمات جديدة",
+      hrefBase: "/admin/reviews",
+    },
+  ].filter((c) => can(c.cap));
 
   return (
     <div className="flex flex-col gap-5">
@@ -19,24 +66,19 @@ export function AdminDashboard() {
         <p className="mt-1 text-small text-muted">تُحدَّث القائمة تلقائيًا فور وصول طلبات جديدة.</p>
       </div>
 
-      <div className="grid gap-5 lg:grid-cols-2">
-        <QueueColumn
-          title="عقارات بانتظار المراجعة"
-          Icon={Home}
-          items={data?.propertyQueue}
-          loading={isLoading}
-          emptyText="لا توجد عقارات بانتظار المراجعة"
-          hrefBase="/admin/properties"
+      {session && columns.length === 0 ? (
+        <EmptyState
+          Icon={ShieldAlert}
+          title="لا تملك صلاحية مراجعة أي طابور"
+          description={`دورك الحالي «${session.roleName}» للاطلاع فقط.`}
         />
-        <QueueColumn
-          title="مستخدمون بحاجة لمراجعة"
-          Icon={ScanFace}
-          items={data?.kycQueue}
-          loading={isLoading}
-          emptyText="لا توجد طلبات توثيق جديدة"
-          hrefBase="/admin/users"
-        />
-      </div>
+      ) : (
+        <div className="grid gap-5 lg:grid-cols-2">
+          {columns.map(({ cap, ...col }) => (
+            <QueueColumn key={cap} {...col} loading={isLoading} />
+          ))}
+        </div>
+      )}
     </div>
   );
 }

@@ -52,12 +52,22 @@ partner_lead:view
 | `request:approve` / `request:reject` | — | — | ✅ |
 | `review:moderate` | — | — | ✅ |
 | `payment:view` / `partner_lead:view` | — | — | ✅ |
+| `report:export` · `ticket:reply` · `audit:view` · `admin:create` · `admin:manage` | — | — | ✅ (super-admin only) |
 
-**V1 keeps a single flat ADMIN.** The previous build's 7 sub-roles
-(super-admin / listings-manager / kyc-reviewer / …) were removed — the ERD has
-no admin-role table and the backlog has no admin-management ticket. If the team
-later wants scoped admins, add an `ADMIN_ROLE` entity and assign capability
-bundles; the capability layer here already supports it.
+**ADMIN is no longer flat.** The 7 sub-roles (super-admin / listings-manager /
+kyc-reviewer / finance-admin / reviews-manager / customer-support / read-only)
+were restored on the owner's instruction — `conflicts.md` B2-R. `ADMIN` is now
+a *bundle selector*: `ROLE_CAPABILITIES` in `contracts/admin.ts` is the single
+source of truth mapping each sub-role to its capabilities, and every admin
+endpoint checks a **capability**, never `role === "admin"`.
+
+Caveat: the ERD still has no admin-role table, so `USER.admin_role` and the
+whole team/audit/ticket surface are frontend-invented (`ASSUMPTIONS.md` #26).
+
+Two rules this must keep:
+- **An admin cannot edit their own privileges** — otherwise a super-admin can
+  demote themselves and strand the team with no one holding `admin:manage`.
+- **`pii:reveal` is not a capability and must never become one.** See below.
 
 ## The PII-reveal gate (safety-critical — not a role check)
 
@@ -73,8 +83,16 @@ Rules:
   `requirements.md` §1.2.)
 - Enforced by **omission**: the backend must not send the fields at all until
   the gate passes. The client never "hides" PII it already holds.
-- Admins do **not** get `pii:reveal` in V1 (no support/dispute tooling is in
-  scope). If added later it must require a reason + audit entry.
+- **No role gets `pii:reveal` — the capability does not exist.** The
+  pre-deletion `customer-support` sub-role carried one; it was deliberately
+  left out of the B2-R restore. A support admin who can unmask any owner's
+  phone by role alone defeats the entire gate. Admins reach contact only via
+  `contactUnlocked`'s explicit admin branch, which is narrow and auditable.
+  If support staff genuinely need it, it must require a reason + an audit
+  entry per reveal — a decision to take deliberately, not a capability to
+  quietly re-add.
+- Pinned by `src/mocks/__tests__/reverseMarketplace.test.ts`, which fails if
+  the gate is loosened.
 
 ## Enforcement layers
 

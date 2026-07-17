@@ -7,12 +7,21 @@ import type { CreateCheckoutRequest, PaymentType } from "@/src/lib/api/contracts
 import type { CreateReviewRequest } from "@/src/lib/api/contracts/review";
 import type { CreatePartnerLeadRequest } from "@/src/lib/api/contracts/partnerLead";
 import type { CreateLeaseContract } from "@/src/lib/api/contracts/contract";
-import type { ReviewDecision } from "@/src/lib/api/contracts/admin";
-import { ADMIN_CAPABILITIES } from "@/src/lib/api/contracts/admin";
-import type { ChatRequest } from "@/src/lib/api/contracts/support";
+import type {
+  AdminRole,
+  CreateAdminRequest,
+  ReviewDecision,
+  UpdateAdminRequest,
+} from "@/src/lib/api/contracts/admin";
+import { ROLE_CAPABILITIES, adminRoleLabels } from "@/src/lib/api/contracts/admin";
+import type { Capability } from "@/src/lib/api/contracts/common";
+import type { AdminReplyRequest, ChatRequest, TicketStatus } from "@/src/lib/api/contracts/support";
 import {
+  audit,
+  capabilitiesFor,
   db,
   findUserByToken,
+  hasCapability,
   isVerified,
   nextId,
   notify,
@@ -23,6 +32,7 @@ import {
   type MockOffer,
   type MockProperty,
   type MockTenantRequest,
+  type MockTicket,
   type MockUser,
 } from "./db";
 
@@ -183,6 +193,59 @@ function offerToReceived(o: MockOffer, viewerId: string) {
   };
 }
 
+/* --- projections for the restored, non-ERD admin surfaces (B2-R) --- */
+
+/**
+ * The mock has no request context, so the IP is synthetic. The real backend
+ * must record the actual client IP.
+ */
+function recordAdminLogin(u: MockUser, success: boolean) {
+  db.loginHistory.unshift({
+    id: nextId("lgn"),
+    adminId: u.id,
+    adminName: u.fullName,
+    ip: "127.0.0.1",
+    at: new Date().toISOString(),
+    success,
+  });
+}
+
+function toTeamMember(u: MockUser) {
+  const role: AdminRole = u.adminRole ?? "super-admin";
+  return {
+    id: u.id,
+    fullName: u.fullName,
+    email: u.email,
+    role,
+    capabilities: ROLE_CAPABILITIES[role],
+    disabled: !u.isActive,
+    lastLoginAt: u.lastLoginAt,
+    createdAt: u.createdAt,
+  };
+}
+
+function toTicketSummary(t: MockTicket) {
+  const assignee = t.assignedAdminId ? db.users.find((u) => u.id === t.assignedAdminId) : null;
+  return {
+    id: t.id,
+    subject: t.subject,
+    userName: db.users.find((u) => u.id === t.userId)?.fullName ?? "مستخدم",
+    status: t.status,
+    assignedAdminName: assignee?.fullName ?? null,
+    lastMessageAt: t.lastMessageAt,
+    createdAt: t.createdAt,
+  };
+}
+
+function toTicketDetail(t: MockTicket) {
+  return {
+    ...toTicketSummary(t),
+    userId: t.userId,
+    assignedAdminId: t.assignedAdminId,
+    messages: t.messages,
+  };
+}
+
 const LEGAL_KEYWORDS = ["إيجار", "عقد", "قانون", "مالك", "مستأجر", "إخلاء", "شقة", "عقار", "تأمين", "زيادة", "فسخ", "إخطار", "محكمة", "ملكية"];
 
 /* -------------------------------- dispatch -------------------------------- */
@@ -198,14 +261,34 @@ export function dispatch(
   const seg = path.replace(/^\//, "").split("/");
   const admin = user?.role === "admin" ? user : null;
   const requireAdmin = () => (admin ? null : forbidden());
+  /**
+   * Capability guard. Admin sub-roles are restored per conflicts.md B2-R, so
+   * "is an admin" is no longer sufficient — a read-only or kyc-reviewer admin
+   * must not clear the property queue. The real NestJS `@Roles()`/guards stay
+   * authoritative; this mirrors them.
+   */
+  const requireCap = (capability: Capability) =>
+    !admin
+      ? forbidden()
+      : hasCapability(admin, capability)
+        ? null
+        : codedErr(403, "CAPABILITY_REQUIRED", "لا تملك صلاحية تنفيذ هذا الإجراء", { capability });
 
   /* ---------------------------- auth (PRO-02) ---------------------------- */
   if (method === "POST" && path === "/auth/login") {
     const b = body as LoginRequest;
     const u = db.users.find((x) => x.email === b.email);
-    if (!u || b.password.length < 8) return err(401, "البريد الإلكتروني أو كلمة المرور غير صحيحة");
-    if (!u.isActive) return forbidden("هذا الحساب موقوف");
+    // Failed admin attempts are recorded too — that's the point of the log.
+    if (!u || b.password.length < 8) {
+      if (u?.role === "admin") recordAdminLogin(u, false);
+      return err(401, "البريد الإلكتروني أو كلمة المرور غير صحيحة");
+    }
+    if (!u.isActive) {
+      if (u.role === "admin") recordAdminLogin(u, false);
+      return forbidden("هذا الحساب موقوف");
+    }
     u.lastLoginAt = new Date().toISOString();
+    if (u.role === "admin") recordAdminLogin(u, true);
     return ok(tokensFor(u));
   }
   if (method === "POST" && path === "/auth/register") {
@@ -850,7 +933,14 @@ export function dispatch(
   if (path === "/admin/session" && method === "GET") {
     const denied = requireAdmin();
     if (denied) return denied;
-    return ok({ id: admin!.id, fullName: admin!.fullName, capabilities: [...ADMIN_CAPABILITIES] });
+    const role = admin!.adminRole ?? "super-admin";
+    return ok({
+      id: admin!.id,
+      fullName: admin!.fullName,
+      role,
+      roleName: adminRoleLabels[role],
+      capabilities: capabilitiesFor(admin!),
+    });
   }
   if (path === "/admin/queues" && method === "GET") {
     const denied = requireAdmin();
@@ -898,7 +988,7 @@ export function dispatch(
     return ok({ kycQueue, propertyQueue, requestQueue, reviewQueue });
   }
   if (seg[0] === "admin" && seg[1] === "kyc" && seg.length === 3 && method === "GET") {
-    const denied = requireAdmin();
+    const denied = requireCap("kyc:review");
     if (denied) return denied;
     const v = db.verifications.find((x) => x.userId === seg[2]);
     if (!v) return err(404, "غير موجود");
@@ -913,7 +1003,7 @@ export function dispatch(
     });
   }
   if (seg[0] === "admin" && seg[1] === "kyc" && seg[3] === "review" && method === "POST") {
-    const denied = requireAdmin();
+    const denied = requireCap("kyc:review");
     if (denied) return denied;
     const v = db.verifications.find((x) => x.userId === seg[2]);
     // Compare-and-swap on PENDING (requirements.md §2).
@@ -924,11 +1014,14 @@ export function dispatch(
     v.rejectionReason = b.decision === "reject" ? b.reason!.trim() : null;
     v.reviewedBy = admin!.id;
     v.reviewedAt = new Date().toISOString();
+    audit(admin!, `kyc:${b.decision} ${v.userId}`, v.userId);
     if (b.decision === "approve") notify(v.userId, "EKYC_APPROVED", "تم توثيق هويتك", "يمكنك الآن استخدام كل المزايا.");
     return ok();
   }
   if (seg[0] === "admin" && seg[1] === "properties" && seg[3] === "review" && method === "POST") {
-    const denied = requireAdmin();
+    const denied = requireCap(
+      (body as ReviewDecision)?.decision === "reject" ? "property:reject" : "property:approve",
+    );
     if (denied) return denied;
     const p = db.properties.find((x) => x.id === seg[2]);
     if (!p || p.status !== "PENDING") return err(409, "تمت مراجعة هذا الطلب بالفعل");
@@ -938,13 +1031,56 @@ export function dispatch(
     p.rejectionReason = b.decision === "reject" ? b.reason!.trim() : null;
     p.approvedBy = admin!.id;
     p.approvedAt = b.decision === "approve" ? new Date().toISOString() : null;
+    audit(admin!, `property:${b.decision} ${p.id}`, p.id);
     // On approval the backend also embeds the text into ChromaDB (PRO-09).
     if (b.decision === "approve")
       notify(p.ownerId, "PROPERTY_APPROVED", "تمت الموافقة على إعلانك", "أصبح إعلانك ظاهرًا للمستأجرين الآن.", `/landlord/properties/${p.id}`);
     return ok({ status: p.status });
   }
+  if (seg[0] === "admin" && seg[1] === "requests" && seg.length === 3 && method === "GET") {
+    const denied = requireCap("request:approve");
+    if (denied) return denied;
+    const r = db.tenantRequests.find((x) => x.id === seg[2]);
+    if (!r) return err(404, "غير موجود");
+    const tenant = db.users.find((u) => u.id === r.tenantId);
+    return ok({
+      id: r.id,
+      // Admins see the tenant here on purpose — see contracts/admin.ts.
+      tenantName: tenant?.fullName ?? "مستأجر",
+      tenantVerified: isVerified(r.tenantId),
+      minBudget: r.minBudget,
+      maxBudget: r.maxBudget,
+      preferredLocations: r.preferredLocations,
+      propertyType: r.propertyType,
+      requiredBedrooms: r.requiredBedrooms,
+      needsFurnished: r.needsFurnished,
+      flexibilityScore: r.flexibilityScore,
+      lifestyleRequirements: r.lifestyleRequirements,
+      status: r.status,
+      rejectionReason: r.rejectionReason,
+      createdAt: r.createdAt,
+    });
+  }
+  if (seg[0] === "admin" && seg[1] === "reviews" && seg.length === 3 && method === "GET") {
+    const denied = requireCap("review:moderate");
+    if (denied) return denied;
+    const r = db.reviews.find((x) => x.id === seg[2]);
+    if (!r) return err(404, "غير موجود");
+    return ok({
+      id: r.id,
+      reviewerName: db.users.find((u) => u.id === r.reviewerId)?.fullName ?? "مستأجر",
+      propertyId: r.propertyId,
+      propertyTitle: db.properties.find((p) => p.id === r.propertyId)?.title ?? "عقار",
+      rating: r.rating,
+      comment: r.comment,
+      status: r.status,
+      createdAt: r.createdAt,
+    });
+  }
   if (seg[0] === "admin" && seg[1] === "requests" && seg[3] === "review" && method === "POST") {
-    const denied = requireAdmin();
+    const denied = requireCap(
+      (body as ReviewDecision)?.decision === "reject" ? "request:reject" : "request:approve",
+    );
     if (denied) return denied;
     const r = db.tenantRequests.find((x) => x.id === seg[2]);
     if (!r || r.status !== "PENDING") return err(409, "تمت مراجعة هذا الطلب بالفعل");
@@ -953,6 +1089,7 @@ export function dispatch(
     r.status = b.decision === "approve" ? "APPROVED" : "REJECTED";
     r.rejectionReason = b.decision === "reject" ? b.reason!.trim() : null;
     r.approvedBy = admin!.id;
+    audit(admin!, `request:${b.decision} ${r.id}`, r.id);
     if (b.decision === "approve") {
       // Published to verified landlords (SRS 3.2.2).
       db.users
@@ -964,7 +1101,7 @@ export function dispatch(
     return ok({ status: r.status });
   }
   if (seg[0] === "admin" && seg[1] === "reviews" && seg[3] === "review" && method === "POST") {
-    const denied = requireAdmin();
+    const denied = requireCap("review:moderate");
     if (denied) return denied;
     const r = db.reviews.find((x) => x.id === seg[2]);
     if (!r || r.status !== "PENDING") return err(409, "تمت مراجعة هذا الطلب بالفعل");
@@ -972,12 +1109,13 @@ export function dispatch(
     if (b.decision === "reject" && !b.reason?.trim()) return err(400, "سبب الرفض مطلوب");
     r.status = b.decision === "approve" ? "APPROVED" : "REJECTED";
     r.reviewedBy = admin!.id;
+    audit(admin!, `review:${b.decision} ${r.id}`, r.id);
     if (b.decision === "approve")
       notify(r.reviewerId, "REVIEW_APPROVED", "تم نشر تقييمك", "أصبح تقييمك ظاهرًا على صفحة العقار.");
     return ok({ status: r.status });
   }
   if (path === "/admin/stats" && method === "GET") {
-    const denied = requireAdmin();
+    const denied = requireCap("payment:view");
     if (denied) return denied;
     const successful = db.payments.filter((p) => p.status === "SUCCESS");
     const live = successful.reduce((s, p) => s + p.amount, 0);
@@ -1008,6 +1146,149 @@ export function dispatch(
         { label: "مرفوض", value: db.properties.filter((p) => p.status === "REJECTED").length },
       ],
     });
+  }
+
+  /* ------------- admin team / RBAC (restored — conflicts.md B2-R) --------- */
+
+  if (path === "/admin/team" && method === "GET") {
+    const denied = requireCap("admin:manage");
+    if (denied) return denied;
+    return ok({ items: db.users.filter((u) => u.role === "admin").map(toTeamMember) });
+  }
+  if (path === "/admin/team" && method === "POST") {
+    const denied = requireCap("admin:create");
+    if (denied) return denied;
+    const b = body as CreateAdminRequest;
+    if (db.users.some((u) => u.email === b.email)) return err(409, "هذا البريد الإلكتروني مسجّل بالفعل");
+    const created: MockUser = {
+      id: nextId("usr"),
+      fullName: b.fullName,
+      email: b.email,
+      passwordHash: "mock",
+      phoneNumber: "01000000000",
+      role: "admin",
+      adminRole: b.role,
+      isActive: true,
+      lastLoginAt: null,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    db.users.push(created);
+    audit(admin!, `admin:create ${created.id} (${b.role})`, created.id);
+    return ok(toTeamMember(created));
+  }
+  if (seg[0] === "admin" && seg[1] === "team" && seg.length === 3 && method === "PATCH") {
+    const denied = requireCap("admin:manage");
+    if (denied) return denied;
+    const target = db.users.find((u) => u.id === seg[2] && u.role === "admin");
+    if (!target) return err(404, "غير موجود");
+    // Guard against an admin dropping their own privileges and locking the
+    // team out — the real backend must enforce this too.
+    if (target.id === admin!.id) return forbidden("لا يمكنك تعديل صلاحيات حسابك");
+    const b = body as UpdateAdminRequest;
+    if (b.role !== undefined) {
+      target.adminRole = b.role;
+      audit(admin!, `admin:role ${target.id} → ${b.role}`, target.id);
+    }
+    if (b.disabled !== undefined) {
+      target.isActive = !b.disabled;
+      audit(admin!, `admin:${b.disabled ? "disable" : "enable"} ${target.id}`, target.id);
+    }
+    target.updatedAt = new Date().toISOString();
+    return ok(toTeamMember(target));
+  }
+  if (seg[0] === "admin" && seg[1] === "team" && seg[3] === "reset-password" && method === "POST") {
+    const denied = requireCap("admin:manage");
+    if (denied) return denied;
+    const target = db.users.find((u) => u.id === seg[2] && u.role === "admin");
+    if (!target) return err(404, "غير موجود");
+    audit(admin!, `admin:reset-password ${target.id}`, target.id);
+    return ok({ sent: true });
+  }
+
+  if (path === "/admin/audit-log" && method === "GET") {
+    const denied = requireCap("audit:view");
+    if (denied) return denied;
+    // Append-only and read-only: there is deliberately no write/delete route.
+    return ok({
+      items: db.auditLog
+        .slice(0, 50)
+        .map((e) => ({ id: e.id, actorName: e.actorName, action: e.action, subjectId: e.subjectId, at: e.at })),
+    });
+  }
+  if (path === "/admin/login-history" && method === "GET") {
+    const denied = requireCap("audit:view");
+    if (denied) return denied;
+    return ok({
+      items: db.loginHistory
+        .slice(0, 50)
+        .map((e) => ({ id: e.id, adminName: e.adminName, ip: e.ip, at: e.at, success: e.success })),
+    });
+  }
+
+  /* ------------ support tickets (restored — conflicts.md B2-R) ------------ */
+
+  if (path === "/admin/tickets" && method === "GET") {
+    const denied = requireCap("ticket:reply");
+    if (denied) return denied;
+    const items = [...db.tickets]
+      .sort((a, b) => b.lastMessageAt.localeCompare(a.lastMessageAt))
+      .map(toTicketSummary);
+    return ok({ items });
+  }
+  if (seg[0] === "admin" && seg[1] === "tickets" && seg.length === 3 && method === "GET") {
+    const denied = requireCap("ticket:reply");
+    if (denied) return denied;
+    const t = db.tickets.find((x) => x.id === seg[2]);
+    return t ? ok(toTicketDetail(t)) : err(404, "غير موجود");
+  }
+  if (seg[0] === "admin" && seg[1] === "tickets" && seg[3] === "reply" && method === "POST") {
+    const denied = requireCap("ticket:reply");
+    if (denied) return denied;
+    const t = db.tickets.find((x) => x.id === seg[2]);
+    if (!t) return err(404, "غير موجود");
+    const b = body as AdminReplyRequest;
+    if (!b.content?.trim()) return err(400, "الرد مطلوب");
+    const at = new Date().toISOString();
+    t.messages.push({
+      id: nextId("sm"),
+      author: "admin",
+      authorName: admin!.fullName,
+      content: b.content.trim(),
+      internal: !!b.internal,
+      at,
+    });
+    t.lastMessageAt = at;
+    // An internal note is not a customer reply — it must not move the ticket on.
+    if (!b.internal) {
+      if (t.status === "new" || t.status === "assigned") t.status = "in_progress";
+      audit(admin!, `ticket:reply ${t.id}`, t.id);
+    } else {
+      audit(admin!, `ticket:note ${t.id}`, t.id);
+    }
+    // No notification: NOTIFICATION.type is a verbatim ERD enum with no ticket
+    // member, and there is no customer-facing support UI to link to. Both
+    // would need to exist first (ASSUMPTIONS.md #26).
+    return ok(toTicketDetail(t));
+  }
+  if (seg[0] === "admin" && seg[1] === "tickets" && seg[3] === "assign" && method === "POST") {
+    const denied = requireCap("ticket:reply");
+    if (denied) return denied;
+    const t = db.tickets.find((x) => x.id === seg[2]);
+    if (!t) return err(404, "غير موجود");
+    t.assignedAdminId = admin!.id;
+    if (t.status === "new") t.status = "assigned";
+    audit(admin!, `ticket:assign ${t.id}`, t.id);
+    return ok(toTicketDetail(t));
+  }
+  if (seg[0] === "admin" && seg[1] === "tickets" && seg[3] === "status" && method === "POST") {
+    const denied = requireCap("ticket:reply");
+    if (denied) return denied;
+    const t = db.tickets.find((x) => x.id === seg[2]);
+    if (!t) return err(404, "غير موجود");
+    t.status = (body as { status: TicketStatus }).status;
+    audit(admin!, `ticket:status ${t.id} → ${t.status}`, t.id);
+    return ok(toTicketDetail(t));
   }
 
   /* -------------------------- legal chat (PRO-17) ------------------------ */

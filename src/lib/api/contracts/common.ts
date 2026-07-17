@@ -35,9 +35,14 @@ export const paginatedSchema = <T extends z.ZodTypeAny>(item: T) =>
  * Check capabilities, never role names: that is what lets the Later `BROKER`
  * role be added without rework (conflicts.md A2).
  *
- * Note: PII reveal is deliberately NOT a capability. It is a per-connection
- * relationship gate (an ACCEPTED offer / CONNECTED match), enforced by the
- * backend omitting the fields — see rbac.md and requirements.md §1.2.
+ * Note: PII reveal is deliberately NOT a capability, even though the restored
+ * admin sub-roles (conflicts.md B2-R) previously carried a `pii:reveal` one.
+ * It is a per-connection relationship gate (an ACCEPTED offer / CONNECTED
+ * match) enforced by the backend omitting the fields — see rbac.md and
+ * requirements.md §1.2. Re-adding it as a capability would let a support admin
+ * unmask an owner's phone by role alone, which is exactly what the gate
+ * exists to prevent. Admins see contact via `contactUnlocked`'s explicit
+ * admin branch, which is auditable; a capability would not be.
  */
 export const CapabilitySchema = z.enum([
   // Tenant
@@ -54,7 +59,7 @@ export const CapabilitySchema = z.enum([
   "offer:send",
   // Shared
   "contract:generate",
-  // Admin (V1 = one flat ADMIN holding all of these)
+  // Admin — bundled into named sub-roles by ROLE_CAPABILITIES in ./admin.
   "property:approve",
   "property:reject",
   "kyc:review",
@@ -63,6 +68,11 @@ export const CapabilitySchema = z.enum([
   "review:moderate",
   "payment:view",
   "partner_lead:view",
+  "report:export",
+  "ticket:reply",
+  "audit:view",
+  "admin:create",
+  "admin:manage",
 ]);
 export type Capability = z.infer<typeof CapabilitySchema>;
 
