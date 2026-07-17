@@ -105,6 +105,12 @@ function RequestCard({ request, onOffer }: { request: BrowsableTenantRequest; on
         <MatchScoreRing score={request.matchScore} size={52} className="shrink-0" />
       </div>
 
+      {request.bestMatchingProperty && (
+        <div className="text-caption text-primary bg-primary-tint/30 rounded-control px-2.5 py-1.5 font-semibold self-start">
+          عقارك الأنسب للمطابقة: {request.bestMatchingProperty.title}
+        </div>
+      )}
+
       <p className="line-clamp-3 text-small leading-relaxed text-body-text">{request.lifestyleRequirements}</p>
 
       <div className="flex flex-wrap items-center gap-3 border-t border-hairline pt-3 text-caption text-muted">

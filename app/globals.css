@@ -71,7 +71,7 @@
   --shadow-card: var(--shadow-card);
   --shadow-sheet: var(--shadow-sheet);
 
-  --font-sans: var(--font-cairo);
+  --font-sans: "Cairo", system-ui, -apple-system, sans-serif;
 
   /* Type scale — Cairo, right-aligned by default (see app/layout.tsx dir="rtl") */
   --text-display: 2rem;

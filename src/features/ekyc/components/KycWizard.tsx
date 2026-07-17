@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { ScanLine, CreditCard, ScanFace, Loader2, BadgeCheck, XCircle, ArrowLeft } from "lucide-react";
 import { useVerificationState, useUploadDocument, useSubmitVerification } from "../hooks/useKyc";
+import { useSession } from "@/src/features/auth/hooks/useSession";
 import { UploadTile } from "./UploadTile";
 import { OwnershipDisclaimer } from "@/src/components/ui/VerifiedBadge";
 import { Button } from "@/src/components/ui/Button";
@@ -22,6 +23,8 @@ const stepConfig: { document: KycDocument; hint: string; Icon: typeof ScanLine }
 export function KycWizard() {
   const router = useRouter();
   const { data: state, isLoading } = useVerificationState();
+  const { data: session } = useSession();
+  const targetDashboard = session?.role === "tenant" ? "/tenant" : session?.role === "admin" ? "/admin" : "/landlord";
   const upload = useUploadDocument();
   const submit = useSubmitVerification();
   const [active, setActive] = useState<KycDocument | null>(null);
@@ -47,7 +50,7 @@ export function KycWizard() {
           </div>
         }
         action={
-          <Button onClick={() => router.push("/landlord")}>
+          <Button onClick={() => router.push(targetDashboard)}>
             المتابعة
             <ArrowLeft className="size-4" aria-hidden />
           </Button>
@@ -68,7 +71,7 @@ export function KycWizard() {
             استلمنا مستنداتك وسيراجعها فريق الإدارة قريبًا. لا يمكنك إرسال طلب آخر أثناء المراجعة.
           </p>
         }
-        action={<Button variant="secondary" onClick={() => router.push("/landlord")}>العودة</Button>}
+        action={<Button variant="secondary" onClick={() => router.push(targetDashboard)}>العودة</Button>}
       />
     );
   }
