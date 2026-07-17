@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { backendFetch, BackendApiError } from "@/src/lib/api/client";
+import { backendFetch, backendStream, BackendApiError } from "@/src/lib/api/client";
 import { ACCESS_TOKEN_COOKIE } from "@/src/lib/api/cookies";
 
 /**
@@ -9,6 +9,31 @@ import { ACCESS_TOKEN_COOKIE } from "@/src/lib/api/cookies";
  * Route Handler per endpoint. Auth endpoints stay separate (app/api/auth/*)
  * because they mint/clear cookies.
  */
+
+/** Routes whose response is piped straight through rather than buffered. */
+const isStreamPath = (path: string[]) => path.at(-1) === "stream";
+
+/**
+ * Pipe an SSE response through untouched (PRO-10/17). The gates still run
+ * upstream, and a rejected request comes back as ordinary JSON — so pass the
+ * upstream status and content-type through rather than assuming a 200 stream.
+ */
+async function forwardStream(request: NextRequest, path: string[]) {
+  const accessToken = request.cookies.get(ACCESS_TOKEN_COOKIE)?.value;
+  const target = `/${path.join("/")}${request.nextUrl.search}`;
+  const body = await request.json().catch(() => undefined);
+
+  const upstream = await backendStream(target, { method: "POST", accessToken, body });
+
+  return new Response(upstream.body, {
+    status: upstream.status,
+    headers: {
+      "content-type": upstream.headers.get("content-type") ?? "text/event-stream; charset=utf-8",
+      "cache-control": "no-cache, no-transform",
+      "x-accel-buffering": "no",
+    },
+  });
+}
 
 async function forward(request: NextRequest, path: string[], hasBody: boolean) {
   const accessToken = request.cookies.get(ACCESS_TOKEN_COOKIE)?.value;
@@ -48,6 +73,7 @@ export async function GET(request: NextRequest, ctx: { params: Promise<{ path: s
 
 export async function POST(request: NextRequest, ctx: { params: Promise<{ path: string[] }> }) {
   const { path } = await ctx.params;
+  if (isStreamPath(path)) return forwardStream(request, path);
   return forward(request, path, true);
 }
 

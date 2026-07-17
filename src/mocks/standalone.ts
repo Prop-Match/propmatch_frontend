@@ -1,6 +1,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { dispatch } from "./router";
 import { attachMockSocket } from "./socket";
+import { dispatchStream, toSseFrame, type StreamRoute } from "./stream";
 
 /**
  * Real HTTP server standing in for the NestJS backend, served on the same
@@ -32,15 +33,49 @@ function readBody(req: IncomingMessage): Promise<unknown> {
 async function handle(req: IncomingMessage, res: ServerResponse) {
   const url = new URL(req.url ?? "/", "http://localhost");
   const body = req.method === "GET" || req.method === "HEAD" ? undefined : await readBody(req);
-  const result = dispatch(
-    req.method ?? "GET",
-    url.pathname,
-    url.searchParams,
-    req.headers.authorization ?? null,
-    body,
-  );
+  const method = req.method ?? "GET";
+  const auth = req.headers.authorization ?? null;
+
+  // Streaming routes (PRO-10/17) come first; dispatchStream returns null for
+  // everything else, so the normal dispatcher still owns the rest of the API.
+  const streamed = dispatchStream(method, url.pathname, auth, body);
+  if (streamed) return sendStream(res, streamed);
+
+  const result = dispatch(method, url.pathname, url.searchParams, auth, body);
   res.writeHead(result.status, { "content-type": "application/json; charset=utf-8" });
   res.end(JSON.stringify(result.body));
+}
+
+async function sendStream(res: ServerResponse, route: StreamRoute) {
+  // A gate said no. Answer as ordinary JSON so the client can react (e.g. open
+  // the paywall) — an SSE stream would already have committed a 200.
+  if (route.error || !route.chunks) {
+    const e = route.error ?? { status: 500, body: { statusCode: 500, message: "stream error" } };
+    res.writeHead(e.status, { "content-type": "application/json; charset=utf-8" });
+    res.end(JSON.stringify(e.body));
+    return;
+  }
+
+  res.writeHead(200, {
+    "content-type": "text/event-stream; charset=utf-8",
+    "cache-control": "no-cache, no-transform",
+    connection: "keep-alive",
+    // Next's proxy and any intermediary must not buffer this.
+    "x-accel-buffering": "no",
+  });
+
+  try {
+    for await (const chunk of route.chunks) {
+      // The client hung up mid-generation — stop rather than write to a dead
+      // socket.
+      if (res.writableEnded || res.destroyed) return;
+      res.write(toSseFrame(chunk));
+    }
+  } catch {
+    res.write(toSseFrame({ type: "done", id: "error" }));
+  } finally {
+    if (!res.writableEnded) res.end();
+  }
 }
 
 let started = false;

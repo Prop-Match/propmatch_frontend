@@ -39,6 +39,7 @@ import {
   type MockVerification,
 } from "./db";
 import { emitMockEvent } from "./events";
+import { legalAnswer, optimizedDescription } from "./ai";
 
 /**
  * Framework-agnostic mock backend mirroring the Final ERD + SRS. Given a
@@ -296,7 +297,6 @@ function toTicketDetail(t: MockTicket) {
   };
 }
 
-const LEGAL_KEYWORDS = ["إيجار", "عقد", "قانون", "مالك", "مستأجر", "إخلاء", "شقة", "عقار", "تأمين", "زيادة", "فسخ", "إخطار", "محكمة", "ملكية"];
 
 /* -------------------------------- dispatch -------------------------------- */
 
@@ -622,7 +622,7 @@ export function dispatch(
     if (b.description.length > 2000) return err(400, "الوصف أطول من المسموح");
     quota.optimizerUsesLeft -= 1;
     return ok({
-      optimized: `${b.description.trim()}\n\nفرصة مميزة لن تتكرر! وحدة بموقع استراتيجي وتشطيبات عالية الجودة، على بعد خطوات من الخدمات والمواصلات. تعامل مباشر مع المالك — بدون وسطاء وبدون عمولة.`,
+      optimized: optimizedDescription(b.description),
       optimizerUsesLeft: quota.optimizerUsesLeft,
     });
   }
@@ -1312,27 +1312,13 @@ export function dispatch(
   }
 
   /* -------------------------- legal chat (PRO-17) ------------------------ */
+  // Buffered variant. The UI streams via POST /legal-chat/stream (PRO-17);
+  // this stays for non-streaming consumers and Jest. Both answer from ./ai.
   if (path === "/legal-chat" && method === "POST") {
     if (!user) return unauth();
     const { message } = body as ChatRequest;
-    const onTopic = LEGAL_KEYWORDS.some((k) => message.includes(k));
-    if (!onTopic) {
-      return ok({
-        id: nextId("msg"),
-        role: "assistant",
-        content: "أقدر أساعدك فقط في أسئلة الإيجار والقانون العقاري في مصر.",
-        declined: true,
-      });
-    }
-    return ok({
-      id: nextId("msg"),
-      role: "assistant",
-      content:
-        "وفقًا للقانون المدني المصري وقانون الإيجار الجديد (القانون رقم 4 لسنة 1996)، العلاقة الإيجارية للعقود الجديدة تحكمها بنود العقد المتفق عليها بين الطرفين. " +
-        "بشكل عام: مدة الإخطار قبل إنهاء العقد تكون حسب المتفق عليه في العقد، وإذا لم يُنص عليها فتُطبق أحكام القانون المدني. " +
-        "ملاحظة: هذه معلومات إرشادية وليست استشارة قانونية ملزمة — يُنصح بمراجعة محامٍ للحالات الخاصة.",
-      declined: false,
-    });
+    const { content, declined } = legalAnswer(message);
+    return ok({ id: nextId("msg"), role: "assistant", content, declined });
   }
 
   return err(404, "المسار غير موجود");

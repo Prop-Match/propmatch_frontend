@@ -61,3 +61,79 @@ export const authApi = {
 export function isApiClientError(e: unknown): e is ApiClientError {
   return e instanceof Error && e.name === "ApiClientError";
 }
+
+/* --------------------------- streaming (PRO-10/17) ------------------------ */
+
+export type StreamChunk =
+  | { type: "token"; value: string }
+  | { type: "done"; id: string; declined?: boolean };
+
+export interface StreamHandlers {
+  onToken: (value: string) => void;
+  signal?: AbortSignal;
+}
+
+/**
+ * POST that consumes an SSE response token by token.
+ *
+ * A gate rejection (401/403 — e.g. QUOTA_EXHAUSTED) arrives as ordinary JSON
+ * *before* any stream starts, and is thrown as a normal `ApiClientError` so
+ * callers handle it exactly as they would a buffered call.
+ *
+ * Resolves with the terminal `done` chunk once generation completes.
+ */
+export async function streamPost(
+  path: string,
+  body: unknown,
+  { onToken, signal }: StreamHandlers,
+): Promise<Extract<StreamChunk, { type: "done" }>> {
+  const res = await fetch(`/api/backend/${path}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
+    body: JSON.stringify(body),
+    signal,
+  });
+
+  if (!res.ok || !res.body) {
+    const data = await res.json().catch(() => null);
+    const message =
+      data && typeof data === "object" && "message" in data
+        ? String((data as { message: unknown }).message)
+        : "حدث خطأ غير متوقع";
+    throw makeError(res.status, message, data);
+  }
+
+  const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
+  let buffer = "";
+  let done: Extract<StreamChunk, { type: "done" }> | null = null;
+
+  try {
+    for (;;) {
+      const { value, done: finished } = await reader.read();
+      if (finished) break;
+      buffer += value;
+
+      // SSE frames are separated by a blank line. A chunk can split a frame in
+      // half, so only consume complete frames and keep the remainder buffered.
+      const frames = buffer.split("\n\n");
+      buffer = frames.pop() ?? "";
+
+      for (const frame of frames) {
+        const line = frame.split("\n").find((l) => l.startsWith("data:"));
+        if (!line) continue;
+        let chunk: StreamChunk;
+        try {
+          chunk = JSON.parse(line.slice(5).trim()) as StreamChunk;
+        } catch {
+          continue;
+        }
+        if (chunk.type === "token") onToken(chunk.value);
+        else done = chunk;
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  return done ?? { type: "done", id: "unknown" };
+}

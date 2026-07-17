@@ -137,9 +137,11 @@ PRO-15 contract → print-PDF · PRO-16 B2B opt-in · PRO-17 legal chat UI · PR
 quotas/paywalls. Plus the ERD extras: `FAVORITE`, `PROPERTY_REVIEW` submit,
 `MATCH_CONNECTION` + phone reveal, and the `NOTIFICATION` bell.
 
+PRO-10 and PRO-17 now **stream** over SSE (`/legal-chat/stream`,
+`.../optimize-description/stream`). Gates run before the first token, so a
+quota-exhausted optimizer still returns a JSON 403 and opens the paywall.
+
 **Not built, and none are purely frontend work:**
-- **Streamed AI (PRO-10/17)** — the last buildable ticket. Needs an SSE/stream
-  endpoint; the mock returns whole responses.
 - **PRO-15 backend PDF** + persisted `LEASE_CONTRACT` — *backend-owned.*
 - **PRO-19 deploy + E2E** — needs a Vercel project and credentials.
 
@@ -181,19 +183,24 @@ verify via tsc/eslint/jest/build and Node/API-level checks instead.
 
 ## 9. Recommended next step
 
-The feature backlog is done. What's left is **not** more building:
+**The frontend is complete.** Every buildable PRO ticket is done. What's left is
+not more building:
 
 1. **Unblock the backend contracts — highest priority, not a coding task.**
-   Two things this repo invented need the backend team to accept or reject:
+   Three things this repo invented need the backend team to accept or reject:
    - The **restored admin surfaces** (`ASSUMPTIONS.md` #26) — no ERD entity, no
      PRO ticket, no backend. They will 404 in production.
    - The **socket handshake** (`ASSUMPTIONS.md` #28) — the gateway must
      authenticate by httpOnly cookie, because this app never exposes the JWT to
-     client JS. Realtime simply won't connect otherwise.
-2. **Streamed AI (PRO-10/17)** — the last buildable frontend ticket.
-3. **Deploy + E2E (PRO-19)** — needs a Vercel project and credentials.
+     client JS. Realtime won't connect otherwise.
+   - The **SSE framing + gate-before-token rule** for PRO-10/17 (`mvp.md`).
+2. **Deploy + E2E (PRO-19)** — needs a Vercel project and credentials.
+3. **PRO-15 backend PDF** — backend-owned.
 
-Work now lives on the **`ali-dev`** branch (not `main`, not `dev`).
+Work lives on the **`ali-dev`** branch (not `main`, not `dev`). Note `origin/dev`
+has moved ahead and the team built *inline* request/review moderation that
+collides with this branch's dedicated moderation pages — `AdminDashboard.tsx`
+and `useAdmin.ts` conflict and need a human decision, not an auto-merge.
 
 ## 10. Working agreement
 
