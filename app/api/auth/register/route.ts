@@ -15,15 +15,21 @@ export async function POST(request: NextRequest) {
   try {
     const backendResponse = await backendFetch<unknown>("/auth/register", {
       method: "POST",
-      body: parsed.data,
+      body: { ...parsed.data, role: parsed.data.role.toUpperCase() },
     });
+
+    console.log("backendResponse:", backendResponse);
+
     const tokens = BackendAuthTokensSchema.parse(backendResponse);
+
+    console.log("tokens:", tokens);
 
     const body: AuthResponse = { user: tokens.user };
     const response = NextResponse.json(body);
     setAuthCookies(response, tokens);
     return response;
   } catch (error) {
+    console.log("error:", error);
     if (error instanceof BackendApiError) {
       return NextResponse.json({ statusCode: error.statusCode, message: error.message }, { status: error.statusCode });
     }
