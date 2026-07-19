@@ -202,6 +202,8 @@ export type AdminTeamMember = z.infer<typeof AdminTeamMemberSchema>;
 export const CreateAdminRequestSchema = z.object({
   fullName: z.string().min(2, "الاسم مطلوب"),
   email: z.string().email("بريد إلكتروني غير صالح"),
+  phoneNumber: z.string().regex(/^0(10|11|12|15)\d{8}$/, "رقم هاتف مصري غير صالح"),
+  password: z.string().min(8, "كلمة المرور يجب أن لا تقل عن 8 أحرف"),
   role: AdminRoleSchema,
 });
 export type CreateAdminRequest = z.infer<typeof CreateAdminRequestSchema>;
