@@ -28,6 +28,7 @@ export class BackendApiError extends Error {
 
 function getBackendUrl(): string {
   const url = process.env.NESTJS_API_URL;
+  console.log("used_url:", url);
   if (!url) {
     throw new Error(
       "NESTJS_API_URL is not set. Copy .env.example to .env.local, or enable API_MOCKING for local dev.",
@@ -76,7 +77,10 @@ export async function backendFetch<T>(path: string, options: BackendFetchOptions
     cache: "no-store",
   });
 
+  // console.log("response:", await response.text());
+
   if (!response.ok) {
+    console.log("response: fail");
     const rawBody = await response.json().catch(() => null);
     const parsed = ApiErrorSchema.safeParse(rawBody);
     const message = parsed.success
@@ -88,8 +92,10 @@ export async function backendFetch<T>(path: string, options: BackendFetchOptions
   }
 
   if (response.status === 204) {
+    // console.log("response: success");
     return undefined as T;
   }
 
+  console.log("response: success");
   return response.json() as Promise<T>;
 }
