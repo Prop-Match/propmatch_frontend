@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { VerificationStatusSchema, type VerificationStatus } from "./verification";
+import { VerificationStatusSchema } from "./verification";
 
 /**
  * Mirrors the Final ERD's `USER` entity. ERD fields are snake_case; the API
@@ -42,12 +42,7 @@ export const UserSchema = z.object({
   phoneNumber: z.string(),
   role: AccountRoleSchema,
   createdAt: z.string(),
-  /**
-   * Legacy/session convenience value from the auth user mapper. It does not
-   * represent the canonical five-state verification lifecycle and must not be
-   * used for protected-action verification gates. `GET /verification/me` is
-   * the source of truth for verification UI and authorization gates.
-   */
+  /** Canonical lifecycle value; GET /verification/me remains the gate source. */
   verificationStatus: VerificationStatusSchema,
 });
 export type User = z.infer<typeof UserSchema>;
@@ -56,36 +51,34 @@ export type User = z.infer<typeof UserSchema>;
 export const AuthResponseSchema = z.object({ user: UserSchema });
 export type AuthResponse = z.infer<typeof AuthResponseSchema>;
 
-/** Shape returned by the backend; consumed only inside app/api/auth/*. */
-const BackendVerificationStatusSchema = z.enum(["unverified", "pending_review", "verified", "rejected"]);
-const backendVerificationStatusMap: Record<z.infer<typeof BackendVerificationStatusSchema>, VerificationStatus> = {
-  unverified: "NOT_SUBMITTED",
-  pending_review: "PENDING",
-  verified: "APPROVED",
-  rejected: "REJECTED",
-};
-
+/** Shape returned by Nest; consumed only inside app/api/auth/*. */
 const BackendUserSchema = z.object({
   id: z.string(),
   fullName: z.string(),
   email: z.string().email(),
-  phone: z.string(),
+  phoneNumber: z.string(),
   role: AccountRoleSchema,
-  verificationStatus: BackendVerificationStatusSchema,
+  isActive: z.boolean().optional(),
+  lastLoginAt: z.string().nullable().optional(),
   createdAt: z.string(),
+  updatedAt: z.string().optional(),
+  verificationStatus: VerificationStatusSchema,
 });
 
 export const BackendUserResponseSchema = BackendUserSchema.transform((user): User => ({
   id: user.id,
   fullName: user.fullName,
   email: user.email,
-  phoneNumber: user.phone,
+  phoneNumber: user.phoneNumber,
   role: user.role,
   createdAt: user.createdAt,
-  verificationStatus: backendVerificationStatusMap[user.verificationStatus],
+  verificationStatus: user.verificationStatus,
 }));
 
-export const BackendMeResponseSchema = z.object({ user: BackendUserResponseSchema });
+export const BackendMeResponseSchema = z.union([
+  BackendUserResponseSchema,
+  z.object({ user: BackendUserResponseSchema }).transform(({ user }) => user),
+]);
 
 export const BackendAuthTokensSchema = z.object({
   accessToken: z.string().optional(),

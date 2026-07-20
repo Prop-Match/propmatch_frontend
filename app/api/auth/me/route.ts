@@ -11,8 +11,14 @@ export async function GET(request: NextRequest) {
 
   try {
     const backendResponse = await backendFetch<unknown>("/auth/me", { accessToken });
-    const { user } = BackendMeResponseSchema.parse(backendResponse);
-    return NextResponse.json({ user });
+    const userResult = BackendMeResponseSchema.safeParse(backendResponse);
+    if (!userResult.success) {
+      return NextResponse.json(
+        { statusCode: 502, message: "Invalid authentication response from backend" },
+        { status: 502 },
+      );
+    }
+    return NextResponse.json({ user: userResult.data });
   } catch (error) {
     if (error instanceof BackendApiError) {
       return NextResponse.json({ statusCode: error.statusCode, message: error.message }, { status: error.statusCode });
