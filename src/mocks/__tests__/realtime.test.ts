@@ -32,6 +32,22 @@ const tenant2 = () => auth("tenant2@example.com");
 const notifications = () => events.filter((e) => e.kind === "notification");
 const queueItems = () => events.filter((e) => e.kind === "adminQueueItem");
 
+const verificationSubmission = () => {
+  const formData = new FormData();
+  const files = {
+    nationalIdFront: new File(["front"], "front.jpg", { type: "image/jpeg" }),
+    nationalIdBack: new File(["back"], "back.jpg", { type: "image/jpeg" }),
+    selfie: new File(["selfie"], "selfie.jpg", { type: "image/jpeg" }),
+  };
+  const get = formData.get.bind(formData);
+  formData.append("nationalId", "29001011234567");
+  formData.append("nationalIdFront", "placeholder");
+  formData.append("nationalIdBack", "placeholder");
+  formData.append("selfie", "placeholder");
+  formData.get = (name) => files[name as keyof typeof files] ?? get(name);
+  return formData;
+};
+
 describe("emitting with no listener registered", () => {
   it("is a no-op — the mock must work under Jest with no gateway", () => {
     setMockEventListener(null);
@@ -104,14 +120,19 @@ describe("admin queue events", () => {
 
   it("announces an eKYC submission, including a resubmission after rejection", () => {
     const unverified = auth("tenant@example.com");
-    call("POST", "/verification/submit", unverified, { nationalId: "29001011234567" });
+    const firstSubmission = call("POST", "/verification/submit", unverified, verificationSubmission());
+    expect(firstSubmission.body).toMatchObject({ status: "PENDING", canSubmit: false });
     expect(queueItems()).toHaveLength(1);
     expect(queueItems()[0].payload).toMatchObject({ type: "kyc", subjectId: "usr_tenant" });
 
-    // Reject, then resubmit — the resubmission must re-enter the queue.
-    call("POST", "/admin/kyc/usr_tenant/review", admin(), { decision: "reject", reason: "صورة غير واضحة" });
+    // Prepare the separately persisted resubmission-required state.
     events = [];
-    call("POST", "/verification/submit", unverified, { nationalId: "29001011234567" });
+    const row = db.verifications.find((item) => item.userId === "usr_tenant")!;
+    row.status = "RESUBMISSION_REQUIRED";
+    row.rejectionReason = "صورة غير واضحة";
+    row.reviewedAt = new Date().toISOString();
+    const resubmission = call("POST", "/verification/submit", unverified, verificationSubmission());
+    expect(resubmission.body).toMatchObject({ status: "PENDING", canSubmit: false });
     expect(queueItems()).toHaveLength(1);
   });
 
