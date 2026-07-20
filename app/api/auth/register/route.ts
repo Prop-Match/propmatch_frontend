@@ -18,18 +18,19 @@ export async function POST(request: NextRequest) {
       body: { ...parsed.data, role: parsed.data.role.toUpperCase() },
     });
 
-    console.log("backendResponse:", backendResponse);
+    const tokensResult = BackendAuthTokensSchema.safeParse(backendResponse);
+    if (!tokensResult.success) {
+      return NextResponse.json(
+        { statusCode: 502, message: "Invalid authentication response from backend" },
+        { status: 502 },
+      );
+    }
 
-    const tokens = BackendAuthTokensSchema.parse(backendResponse);
-
-    console.log("tokens:", tokens);
-
-    const body: AuthResponse = { user: tokens.user };
+    const body: AuthResponse = { user: tokensResult.data.user };
     const response = NextResponse.json(body);
-    setAuthCookies(response, tokens);
+    setAuthCookies(response, tokensResult.data);
     return response;
   } catch (error) {
-    console.log("error:", error);
     if (error instanceof BackendApiError) {
       return NextResponse.json({ statusCode: error.statusCode, message: error.message }, { status: error.statusCode });
     }

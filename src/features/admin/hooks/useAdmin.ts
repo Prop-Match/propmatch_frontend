@@ -37,6 +37,8 @@ export function useKycReview(userId: string) {
   return useQuery({
     queryKey: ["admin", "kyc", userId],
     queryFn: () => api.get<KycReviewDetail>(`admin/kyc/${userId}`),
+    staleTime: 0,
+    refetchOnMount: "always",
   });
 }
 

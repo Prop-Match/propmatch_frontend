@@ -3,7 +3,8 @@
 import { useCallback, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, streamPost } from "@/src/lib/api/browserClient";
-import { toActionError, type ActionError } from "@/src/lib/api/actionError";
+import { isVerificationRequired, toActionError, type ActionError } from "@/src/lib/api/actionError";
+import { verificationQueryKey } from "@/src/features/ekyc/hooks/useKyc";
 import type {
   CreatePropertyRequest,
   PropertyDetail,
@@ -36,6 +37,7 @@ export type LandlordActionError = ActionError;
 export function useCreateProperty() {
   const qc = useQueryClient();
   return useMutation<CreatePropertyResult, LandlordActionError, CreatePropertyRequest>({
+    retry: false,
     mutationFn: async (body) => {
       try {
         return await api.post<CreatePropertyResult>("landlord/properties", body);
@@ -46,6 +48,11 @@ export function useCreateProperty() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["properties", "mine"] });
       qc.invalidateQueries({ queryKey: ["quota"] });
+    },
+    onError: async (error) => {
+      if (!isVerificationRequired(error)) return;
+
+      await qc.refetchQueries({ queryKey: verificationQueryKey, exact: true });
     },
   });
 }

@@ -122,10 +122,10 @@ export type ReviewDecision = z.infer<typeof ReviewDecisionSchema>;
 export const KycReviewDetailSchema = z.object({
   userId: z.string(),
   userName: z.string(),
-  nationalId: z.string(),
-  nationalIdFrontUrl: z.string(),
-  nationalIdBackUrl: z.string(),
-  selfieUrl: z.string(),
+  nationalId: z.string().nullable(),
+  nationalIdFrontUrl: z.string().url().refine((value) => /^https?:\/\//.test(value)),
+  nationalIdBackUrl: z.string().url().refine((value) => /^https?:\/\//.test(value)),
+  selfieUrl: z.string().url().refine((value) => /^https?:\/\//.test(value)),
   submittedAt: z.string(),
 });
 export type KycReviewDetail = z.infer<typeof KycReviewDetailSchema>;

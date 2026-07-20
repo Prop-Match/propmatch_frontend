@@ -11,10 +11,8 @@ import { z } from "zod";
  */
 
 /**
- * ERD persists `PENDING | APPROVED | REJECTED`. The two extra states are
- * frontend-derived (docs/analysis/conflicts.md A5):
- *  - NOT_SUBMITTED          → no IDENTITY_VERIFICATION row exists
- *  - RESUBMISSION_REQUIRED  → REJECTED + a rejection_reason to act on
+ * The backend persists every state except `NOT_SUBMITTED`, which represents
+ * the absence of an IDENTITY_VERIFICATION row.
  */
 export const VerificationStatusSchema = z.enum([
   "NOT_SUBMITTED",
@@ -25,8 +23,26 @@ export const VerificationStatusSchema = z.enum([
 ]);
 export type VerificationStatus = z.infer<typeof VerificationStatusSchema>;
 
-/** The three statuses the backend is assumed to persist. */
-export const PersistedVerificationStatusSchema = z.enum(["PENDING", "APPROVED", "REJECTED"]);
+/** Safe, user-facing verification state returned by the backend. */
+export const VerificationResponseSchema = z.object({
+  status: VerificationStatusSchema,
+  rejectionReason: z.string().nullable(),
+  submittedAt: z.string().nullable(),
+  reviewedAt: z.string().nullable(),
+  canSubmit: z.boolean(),
+}).strict();
+export type VerificationResponse = z.infer<typeof VerificationResponseSchema>;
+
+/** Browser-only input for the multipart verification submission endpoint. */
+export type SubmitVerificationInput = {
+  nationalId?: string;
+  nationalIdFront: File;
+  nationalIdBack: File;
+  selfie: File;
+};
+
+/** The statuses persisted on an existing verification row. */
+export const PersistedVerificationStatusSchema = z.enum(["PENDING", "APPROVED", "REJECTED", "RESUBMISSION_REQUIRED"]);
 export type PersistedVerificationStatus = z.infer<typeof PersistedVerificationStatusSchema>;
 
 /** The eKYC wizard's upload steps (ERD: front/back/selfie URLs). */
@@ -48,13 +64,17 @@ export const KycUploadResponseSchema = z.object({
 });
 export type KycUploadResponse = z.infer<typeof KycUploadResponseSchema>;
 
-export const KycSubmitRequestSchema = z.object({
+/** @deprecated Legacy JSON-only wizard input; not the backend submission contract. */
+export const LegacyKycSubmitRequestSchema = z.object({
   nationalId: z.string().regex(/^\d{14}$/, "الرقم القومي 14 رقمًا"),
 });
-export type KycSubmitRequest = z.infer<typeof KycSubmitRequestSchema>;
+export type LegacyKycSubmitRequest = z.infer<typeof LegacyKycSubmitRequestSchema>;
 
-/** The user-facing view of their own verification. */
-export const VerificationStateSchema = z.object({
+/**
+ * Legacy wizard-local state retained temporarily for existing UI compatibility.
+ * It is not the GET /verification/me response contract.
+ */
+export const LegacyKycWizardStateSchema = z.object({
   status: VerificationStatusSchema,
   uploadedDocuments: z.array(KycDocumentSchema),
   /** Masked to the last 4 (requirements.md §3). Null until submitted. */
@@ -65,4 +85,7 @@ export const VerificationStateSchema = z.object({
   /** Whether the user may submit/resubmit right now. */
   canSubmit: z.boolean(),
 });
-export type VerificationState = z.infer<typeof VerificationStateSchema>;
+export type LegacyKycWizardState = z.infer<typeof LegacyKycWizardStateSchema>;
+
+/** @deprecated Legacy wizard-only compatibility alias, not an API response. */
+export type VerificationState = LegacyKycWizardState;
