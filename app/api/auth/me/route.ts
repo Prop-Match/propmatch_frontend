@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { backendFetch, BackendApiError } from "@/src/lib/api/client";
 import { ACCESS_TOKEN_COOKIE } from "@/src/lib/api/cookies";
-import { UserSchema } from "@/src/lib/api/contracts/auth";
+import { BackendMeResponseSchema } from "@/src/lib/api/contracts/auth";
 
 export async function GET(request: NextRequest) {
   const accessToken = request.cookies.get(ACCESS_TOKEN_COOKIE)?.value;
@@ -10,7 +10,8 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const user = UserSchema.parse(await backendFetch("/auth/me", { accessToken }));
+    const backendResponse = await backendFetch<unknown>("/auth/me", { accessToken });
+    const { user } = BackendMeResponseSchema.parse(backendResponse);
     return NextResponse.json({ user });
   } catch (error) {
     if (error instanceof BackendApiError) {

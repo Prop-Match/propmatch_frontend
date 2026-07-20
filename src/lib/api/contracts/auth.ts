@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { VerificationStatusSchema } from "./verification";
+import { VerificationStatusSchema, type VerificationStatus } from "./verification";
 
 /**
  * Mirrors the Final ERD's `USER` entity. ERD fields are snake_case; the API
@@ -41,14 +41,12 @@ export const UserSchema = z.object({
   email: z.string().email(),
   phoneNumber: z.string(),
   role: AccountRoleSchema,
-  isActive: z.boolean(),
-  lastLoginAt: z.string().nullable(),
   createdAt: z.string(),
-  updatedAt: z.string(),
   /**
-   * Derived convenience field joined from `IDENTITY_VERIFICATION` so every
-   * surface can apply the progressive-verification gates (SRS 3.1/3.4)
-   * without a second request. `NOT_SUBMITTED` = no verification row exists.
+   * Legacy/session convenience value from the auth user mapper. It does not
+   * represent the canonical five-state verification lifecycle and must not be
+   * used for protected-action verification gates. `GET /verification/me` is
+   * the source of truth for verification UI and authorization gates.
    */
   verificationStatus: VerificationStatusSchema,
 });
@@ -59,9 +57,47 @@ export const AuthResponseSchema = z.object({ user: UserSchema });
 export type AuthResponse = z.infer<typeof AuthResponseSchema>;
 
 /** Shape returned by the backend; consumed only inside app/api/auth/*. */
-export const BackendAuthTokensSchema = z.object({
-  accessToken: z.string(),
-  refreshToken: z.string(),
-  user: UserSchema,
+const BackendVerificationStatusSchema = z.enum(["unverified", "pending_review", "verified", "rejected"]);
+const backendVerificationStatusMap: Record<z.infer<typeof BackendVerificationStatusSchema>, VerificationStatus> = {
+  unverified: "NOT_SUBMITTED",
+  pending_review: "PENDING",
+  verified: "APPROVED",
+  rejected: "REJECTED",
+};
+
+const BackendUserSchema = z.object({
+  id: z.string(),
+  fullName: z.string(),
+  email: z.string().email(),
+  phone: z.string(),
+  role: AccountRoleSchema,
+  verificationStatus: BackendVerificationStatusSchema,
+  createdAt: z.string(),
 });
+
+export const BackendUserResponseSchema = BackendUserSchema.transform((user): User => ({
+  id: user.id,
+  fullName: user.fullName,
+  email: user.email,
+  phoneNumber: user.phone,
+  role: user.role,
+  createdAt: user.createdAt,
+  verificationStatus: backendVerificationStatusMap[user.verificationStatus],
+}));
+
+export const BackendMeResponseSchema = z.object({ user: BackendUserResponseSchema });
+
+export const BackendAuthTokensSchema = z.object({
+  accessToken: z.string().optional(),
+  accesstoken: z.string().optional(),
+  refreshToken: z.string(),
+  user: BackendUserResponseSchema,
+}).refine((tokens) => Boolean(tokens.accessToken ?? tokens.accesstoken), {
+  message: "Backend auth response must include an access token.",
+  path: ["accessToken"],
+}).transform((tokens) => ({
+  accessToken: tokens.accessToken ?? tokens.accesstoken!,
+  refreshToken: tokens.refreshToken,
+  user: tokens.user,
+}));
 export type BackendAuthTokens = z.infer<typeof BackendAuthTokensSchema>;
