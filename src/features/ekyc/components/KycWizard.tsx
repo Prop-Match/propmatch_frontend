@@ -105,8 +105,8 @@ export function KycWizard() {
         <div className="flex items-start gap-3 rounded-card border border-error/30 bg-error-tint px-4 py-3" role="alert">
           <XCircle className="mt-0.5 size-5 shrink-0 text-error" aria-hidden />
           <div>
-            <p className="text-small font-bold text-error">يلزم إعادة إرسال المستندات</p>
-            <p className="text-caption text-body-text">{state.rejectionReason}</p>
+            <p className="text-small font-bold text-error">مطلوب إعادة تقديم المستندات</p>
+            <p className="text-caption text-body-text">سبب طلب إعادة التقديم: {state.rejectionReason}</p>
           </div>
         </div>
       )}
@@ -141,7 +141,11 @@ export function KycWizard() {
       {submissionError && <p className="text-small text-error" role="alert" aria-live="polite">{submissionError}</p>}
 
       <Button size="lg" block loading={submit.isPending} disabled={!state.canSubmit || submit.isPending} onClick={submitRequest}>
-        {submit.isPending ? "جارٍ إرسال طلب التحقق..." : "إرسال للمراجعة"}
+        {submit.isPending
+          ? "جارٍ إرسال طلب التحقق..."
+          : state.status === "RESUBMISSION_REQUIRED"
+            ? "إعادة تقديم المستندات"
+            : "إرسال للمراجعة"}
       </Button>
     </div>
   );

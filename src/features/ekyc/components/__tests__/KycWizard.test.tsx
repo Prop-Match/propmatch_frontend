@@ -58,13 +58,14 @@ describe("KycWizard", () => {
     getVerification.mockResolvedValue(response("RESUBMISSION_REQUIRED"));
     submit.mockResolvedValue(response("PENDING"));
     const { container } = renderWizard();
-    expect(await screen.findByText("يلزم إعادة إرسال المستندات")).toBeInTheDocument();
+    expect(await screen.findByText("مطلوب إعادة تقديم المستندات")).toBeInTheDocument();
+    expect(screen.getByText(/سبب طلب إعادة التقديم/)).toBeInTheDocument();
 
     const [front, back, selfie] = Array.from(container.querySelectorAll<HTMLInputElement>('input[type="file"]'));
     fireEvent.change(front, { target: { files: [new File(["front"], "front.jpg", { type: "image/jpeg" })] } });
     fireEvent.change(back, { target: { files: [new File(["back"], "back.png", { type: "image/png" })] } });
     fireEvent.change(selfie, { target: { files: [new File(["selfie"], "selfie.webp", { type: "image/webp" })] } });
-    fireEvent.click(screen.getByRole("button", { name: "إرسال للمراجعة" }));
+    fireEvent.click(screen.getByRole("button", { name: "إعادة تقديم المستندات" }));
 
     await waitFor(() => expect(submit).toHaveBeenCalledWith(expect.objectContaining({
       nationalId: undefined,
