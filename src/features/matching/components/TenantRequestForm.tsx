@@ -15,6 +15,7 @@ import {
   type CreateTenantRequest,
 } from "@/src/lib/api/contracts/tenantRequest";
 import { propertyTypeLabels, type PropertyType } from "@/src/lib/api/contracts/property";
+import { VerificationGate } from "@/src/features/ekyc/components/VerificationGate";
 
 const defaults: CreateTenantRequest = {
   minBudget: 2000,
@@ -33,6 +34,14 @@ const defaults: CreateTenantRequest = {
  * SRS 3.2.2); nothing is published until then, so the success copy says so.
  */
 export function TenantRequestForm() {
+  return (
+    <VerificationGate verificationPath="/verify">
+      <TenantRequestFormContent />
+    </VerificationGate>
+  );
+}
+
+function TenantRequestFormContent() {
   const router = useRouter();
   const toast = useToast();
   const create = useCreateTenantRequest();
@@ -55,8 +64,7 @@ export function TenantRequestForm() {
       },
       onError: (e) => {
         if (e.code === "VERIFICATION_REQUIRED") {
-          toast("info", "وثّق هويتك أولًا لنشر طلبك");
-          router.push("/verify");
+          toast("info", e.message);
         } else {
           toast("error", e.message);
         }

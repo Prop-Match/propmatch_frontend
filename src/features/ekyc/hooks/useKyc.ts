@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { getMyVerification, submitVerification } from "@/src/lib/api/verification";
 import type { SubmitVerificationInput } from "@/src/lib/api/contracts/verification";
 
-const KEY = ["verification"] as const;
+export const verificationQueryKey = ["verification"] as const;
 
 export const ACCEPTED_TYPES = ["image/jpeg", "image/png", "image/webp"] as const;
 export const MAX_FILE_SIZE = 5 * 1024 * 1024;
@@ -19,7 +19,7 @@ export function validateVerificationFile(file: File | null): string | null {
 }
 
 export function useVerificationState() {
-  return useQuery({ queryKey: KEY, queryFn: getMyVerification, retry: false });
+  return useQuery({ queryKey: verificationQueryKey, queryFn: getMyVerification, retry: false });
 }
 
 export function useSubmitVerification() {
@@ -27,6 +27,6 @@ export function useSubmitVerification() {
   return useMutation({
     mutationFn: (input: SubmitVerificationInput) => submitVerification(input),
     retry: false,
-    onSuccess: (response) => queryClient.setQueryData(KEY, response),
+    onSuccess: (response) => queryClient.setQueryData(verificationQueryKey, response),
   });
 }
