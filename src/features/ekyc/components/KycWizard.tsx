@@ -3,197 +3,162 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { ScanLine, CreditCard, ScanFace, Loader2, BadgeCheck, XCircle, ArrowLeft } from "lucide-react";
-import { useVerificationState, useUploadDocument, useSubmitVerification } from "../hooks/useKyc";
+import { useSubmitVerification, useVerificationState, validateVerificationFile } from "../hooks/useKyc";
 import { useSession } from "@/src/features/auth/hooks/useSession";
+import { isApiClientError } from "@/src/lib/api/browserClient";
+import type { VerificationResponse } from "@/src/lib/api/contracts/verification";
+import { kycDocumentLabels, type KycDocument } from "@/src/lib/api/contracts/verification";
 import { UploadTile } from "./UploadTile";
 import { OwnershipDisclaimer } from "@/src/components/ui/VerifiedBadge";
 import { Button } from "@/src/components/ui/Button";
 import { InputField } from "@/src/components/ui/Field";
 import { Skeleton } from "@/src/components/ui/Skeleton";
-import { maskNationalId } from "@/src/utils/format";
-import { kycDocumentLabels, type KycDocument } from "@/src/lib/api/contracts/verification";
+import { ErrorState } from "@/src/components/ui/States";
 
-/** PRO-03: National ID front → back → selfie, then submit → PENDING. */
-const stepConfig: { document: KycDocument; hint: string; Icon: typeof ScanLine }[] = [
-  { document: "national_id_front", hint: "صوّر وجه البطاقة الأمامي بوضوح", Icon: ScanLine },
-  { document: "national_id_back", hint: "صوّر وجه البطاقة الخلفي", Icon: CreditCard },
-  { document: "selfie", hint: "التقط صورة شخصية للتحقق", Icon: ScanFace },
+const stepConfig: { document: KycDocument; field: "nationalIdFront" | "nationalIdBack" | "selfie"; hint: string; Icon: typeof ScanLine }[] = [
+  { document: "national_id_front", field: "nationalIdFront", hint: "صوّر وجه البطاقة الأمامي بوضوح", Icon: ScanLine },
+  { document: "national_id_back", field: "nationalIdBack", hint: "صوّر وجه البطاقة الخلفي", Icon: CreditCard },
+  { document: "selfie", field: "selfie", hint: "التقط صورة شخصية للتحقق", Icon: ScanFace },
 ];
+
+type FileField = (typeof stepConfig)[number]["field"];
+type Files = Record<FileField, File | null>;
+type FileErrors = Partial<Record<FileField, string>>;
+
+const emptyFiles = (): Files => ({ nationalIdFront: null, nationalIdBack: null, selfie: null });
+
+function formatSubmittedAt(value: string | null) {
+  return value ? new Intl.DateTimeFormat("ar-EG", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value)) : null;
+}
 
 export function KycWizard() {
   const router = useRouter();
-  const { data: state, isLoading } = useVerificationState();
+  const verification = useVerificationState();
+  const submit = useSubmitVerification();
   const { data: session } = useSession();
   const targetDashboard = session?.role === "tenant" ? "/tenant" : session?.role === "admin" ? "/admin" : "/landlord";
-  const upload = useUploadDocument();
-  const submit = useSubmitVerification();
-  const [active, setActive] = useState<KycDocument | null>(null);
-  const [captured, setCaptured] = useState<KycDocument[]>([]);
+  const [files, setFiles] = useState<Files>(emptyFiles);
+  const [fileErrors, setFileErrors] = useState<FileErrors>({});
   const [nationalId, setNationalId] = useState("");
+  const [submissionError, setSubmissionError] = useState<string | null>(null);
 
-  if (isLoading || !state) return <Skeleton className="h-96 w-full" />;
-
-  if (state.status === "APPROVED") {
-    return (
-      <ResultCard
-        tone="success"
-        Icon={BadgeCheck}
-        title="تم توثيق هويتك"
-        body={
-          <div className="flex flex-col gap-1 text-body text-body-text">
-            <p>يمكنك الآن نشر إعلاناتك وطلباتك والتواصل بعد قبول العروض.</p>
-            {state.nationalIdLast4 && (
-              <p>
-                الرقم القومي: <b className="text-ink" dir="ltr">{maskNationalId(state.nationalIdLast4)}</b>
-              </p>
-            )}
-          </div>
-        }
-        action={
-          <Button onClick={() => router.push(targetDashboard)}>
-            المتابعة
-            <ArrowLeft className="size-4" aria-hidden />
-          </Button>
-        }
-      />
-    );
+  if (verification.isLoading) return <Skeleton className="h-96 w-full" />;
+  if (verification.isError || !verification.data) {
+    return <ErrorState message="تعذر تحميل حالة التحقق. حاول مرة أخرى." onRetry={() => verification.refetch()} />;
   }
 
-  if (state.status === "PENDING") {
-    return (
-      <ResultCard
-        tone="pending"
-        Icon={Loader2}
-        spin
-        title="طلب التوثيق قيد المراجعة"
-        body={
-          <p className="text-body text-body-text">
-            استلمنا مستنداتك وسيراجعها فريق الإدارة قريبًا. لا يمكنك إرسال طلب آخر أثناء المراجعة.
-          </p>
-        }
-        action={<Button variant="secondary" onClick={() => router.push(targetDashboard)}>العودة</Button>}
-      />
-    );
+  const state = verification.data;
+  if (state.status !== "NOT_SUBMITTED" && state.status !== "RESUBMISSION_REQUIRED") {
+    return <VerificationResult state={state} onContinue={() => router.push(targetDashboard)} />;
   }
 
-  const allCaptured = stepConfig.every((s) => captured.includes(s.document));
-  const lastReason = upload.data && !upload.data.accepted ? upload.data.reason : null;
+  const updateFile = (field: FileField, file: File | null) => {
+    const error = validateVerificationFile(file);
+    setFiles((current) => ({ ...current, [field]: file }));
+    setFileErrors((current) => ({ ...current, [field]: error ?? undefined }));
+  };
 
-  function capture(document: KycDocument, simulateUnreadable = false) {
-    setActive(document);
-    upload.mutate(
-      { document, simulateUnreadable },
+  const submitRequest = () => {
+    const errors = Object.fromEntries(
+      (Object.keys(files) as FileField[]).map((field) => [field, validateVerificationFile(files[field]) ?? undefined]),
+    ) as FileErrors;
+    setFileErrors(errors);
+    if (Object.values(errors).some(Boolean) || submit.isPending) return;
+
+    setSubmissionError(null);
+    submit.mutate(
       {
-        onSuccess: (res) => {
-          if (res.accepted) setCaptured((c) => (c.includes(document) ? c : [...c, document]));
+        nationalId: nationalId.trim() || undefined,
+        nationalIdFront: files.nationalIdFront!,
+        nationalIdBack: files.nationalIdBack!,
+        selfie: files.selfie!,
+      },
+      {
+        onSuccess: () => {
+          setFiles(emptyFiles());
+          setFileErrors({});
+          setNationalId("");
         },
-        onSettled: () => setActive(null),
+        onError: async (error) => {
+          const message = isApiClientError(error)
+            ? error.statusCode === 400 || error.statusCode === 409
+              ? error.message
+              : "تعذر إرسال طلب التحقق الآن. حاول مرة أخرى."
+            : "تعذر إرسال طلب التحقق الآن. حاول مرة أخرى.";
+          setSubmissionError(message);
+          if (isApiClientError(error) && error.statusCode === 409) await verification.refetch();
+        },
       },
     );
-  }
+  };
 
   return (
-    <div className="mx-auto flex max-w-xl flex-col gap-5">
+    <div className="mx-auto flex max-w-xl flex-col gap-5" aria-busy={submit.isPending}>
       <div>
         <h1 className="text-h1 font-bold text-ink">توثيق الهوية</h1>
-        <p className="mt-1 text-small text-muted">
-          التوثيق مطلوب مرة واحدة قبل نشر إعلان أو طلب، وقبل قبول العروض.
-        </p>
+        <p className="mt-1 text-small text-muted">التوثيق مطلوب مرة واحدة قبل نشر إعلان أو طلب، وقبل قبول العروض.</p>
       </div>
 
       <OwnershipDisclaimer />
 
-      {/* REJECTED → the user fixes what the admin flagged and resubmits. */}
-      {state.rejectionReason && (
-        <div className="flex items-start gap-3 rounded-card border border-error/30 bg-error-tint px-4 py-3">
+      {state.status === "RESUBMISSION_REQUIRED" && state.rejectionReason && (
+        <div className="flex items-start gap-3 rounded-card border border-error/30 bg-error-tint px-4 py-3" role="alert">
           <XCircle className="mt-0.5 size-5 shrink-0 text-error" aria-hidden />
           <div>
-            <p className="text-small font-bold text-error">تم رفض الطلب السابق</p>
+            <p className="text-small font-bold text-error">يلزم إعادة إرسال المستندات</p>
             <p className="text-caption text-body-text">{state.rejectionReason}</p>
           </div>
         </div>
       )}
 
       <div className="flex flex-col gap-3">
-        {stepConfig.map(({ document, hint, Icon }) => {
-          const done = captured.includes(document);
-          const isUploading = active === document && upload.isPending;
-          const isBad = !done && upload.variables?.document === document && upload.data?.accepted === false;
+        {stepConfig.map(({ document, field, hint, Icon }) => {
+          const error = fileErrors[field];
           return (
             <UploadTile
               key={document}
               title={kycDocumentLabels[document]}
               hint={hint}
               Icon={Icon}
-              reason={isBad ? lastReason : undefined}
-              state={done ? "captured" : isUploading ? "uploading" : isBad ? "bad-quality" : "empty"}
-              onCapture={() => capture(document)}
+              reason={error}
+              state={submit.isPending ? "locked" : files[field] ? "captured" : error ? "bad-quality" : "empty"}
+              onFileChange={(file) => updateFile(field, file)}
             />
           );
         })}
       </div>
 
       <InputField
-        label="الرقم القومي"
+        label="الرقم القومي (اختياري)"
         inputMode="numeric"
         dir="ltr"
-        placeholder="14 رقمًا"
         value={nationalId}
-        onChange={(e) => setNationalId(e.target.value)}
-        hint="يُستخدم للتحقق فقط، ويظهر مخفيًا في كل مكان عدا العقد."
+        disabled={submit.isPending}
+        onChange={(event) => setNationalId(event.target.value)}
+        hint="يمكن تركه فارغًا عند إعادة الإرسال."
       />
 
-      {/* Dev-only: exercise the unreadable-document path. */}
-      {process.env.NODE_ENV !== "production" && (
-        <button
-          type="button"
-          onClick={() => capture("national_id_front", true)}
-          className="text-caption text-muted underline hover:text-body-text"
-        >
-          محاكاة مستند غير واضح (للتجربة)
-        </button>
-      )}
+      {submissionError && <p className="text-small text-error" role="alert" aria-live="polite">{submissionError}</p>}
 
-      <Button
-        size="lg"
-        disabled={!allCaptured || !state.canSubmit || !/^\d{14}$/.test(nationalId)}
-        loading={submit.isPending}
-        onClick={() => submit.mutate(nationalId)}
-      >
-        إرسال للمراجعة
+      <Button size="lg" block loading={submit.isPending} disabled={!state.canSubmit || submit.isPending} onClick={submitRequest}>
+        {submit.isPending ? "جارٍ إرسال طلب التحقق..." : "إرسال للمراجعة"}
       </Button>
     </div>
   );
 }
 
-function ResultCard({
-  tone,
-  Icon,
-  title,
-  body,
-  action,
-  spin,
-}: {
-  tone: "success" | "error" | "pending";
-  Icon: typeof BadgeCheck;
-  title: string;
-  body: React.ReactNode;
-  action?: React.ReactNode;
-  spin?: boolean;
-}) {
-  const toneClass = {
-    success: "bg-success-tint text-success",
-    error: "bg-error-tint text-error",
-    pending: "bg-pending-tint text-pending",
-  }[tone];
-  return (
-    <div className="mx-auto flex max-w-md flex-col items-center gap-4 rounded-card border border-hairline bg-surface p-8 text-center shadow-card">
-      <span className={`flex size-16 items-center justify-center rounded-full ${toneClass}`}>
-        <Icon className={`size-8 ${spin ? "animate-spin" : ""}`} aria-hidden />
-      </span>
-      <h1 className="text-h2 font-bold text-ink">{title}</h1>
-      {body}
-      {action}
-    </div>
-  );
+function VerificationResult({ state, onContinue }: { state: VerificationResponse; onContinue: () => void }) {
+  const submittedAt = formatSubmittedAt(state.submittedAt);
+  if (state.status === "PENDING") {
+    return <ResultCard tone="pending" Icon={Loader2} spin title="طلب التوثيق قيد المراجعة" body={<><p>تم إرسال طلب التحقق بنجاح وهو قيد المراجعة.</p>{submittedAt && <p className="text-caption">تاريخ الإرسال: {submittedAt}</p>}</>} action={<Button variant="secondary" onClick={onContinue}>العودة</Button>} />;
+  }
+  if (state.status === "APPROVED") {
+    return <ResultCard tone="success" Icon={BadgeCheck} title="تم توثيق هويتك بنجاح" body={<div className="flex flex-col gap-2"><p>يمكنك الآن استخدام الميزات المتاحة للحساب الموثّق.</p><OwnershipDisclaimer /></div>} action={<Button onClick={onContinue}>المتابعة <ArrowLeft className="size-4" aria-hidden /></Button>} />;
+  }
+  return <ResultCard tone="error" Icon={XCircle} title="تم رفض طلب التوثيق" body={<div className="flex flex-col gap-2"><p>{state.rejectionReason ?? "لا يمكن إرسال طلب جديد في الحالة الحالية."}</p><p className="text-caption">لا يمكن إعادة الإرسال في الحالة الحالية.</p></div>} action={<Button variant="secondary" onClick={onContinue}>العودة</Button>} />;
+}
+
+function ResultCard({ tone, Icon, title, body, action, spin }: { tone: "success" | "error" | "pending"; Icon: typeof BadgeCheck; title: string; body: React.ReactNode; action?: React.ReactNode; spin?: boolean }) {
+  const toneClass = { success: "bg-success-tint text-success", error: "bg-error-tint text-error", pending: "bg-pending-tint text-pending" }[tone];
+  return <div className="mx-auto flex max-w-md flex-col items-center gap-4 rounded-card border border-hairline bg-surface p-8 text-center shadow-card" aria-live="polite"><span className={`flex size-16 items-center justify-center rounded-full ${toneClass}`}><Icon className={`size-8 ${spin ? "animate-spin" : ""}`} aria-hidden /></span><h1 className="text-h2 font-bold text-ink">{title}</h1><div className="text-body text-body-text">{body}</div>{action}</div>;
 }
