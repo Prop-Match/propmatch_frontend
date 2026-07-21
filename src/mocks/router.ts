@@ -1094,7 +1094,7 @@ export function dispatch(
       id: r.id,
       // Admins see the tenant here on purpose — see contracts/admin.ts.
       tenantName: tenant?.fullName ?? "مستأجر",
-      tenantVerified: isVerified(r.tenantId),
+      tenantVerificationStatus: isVerified(r.tenantId) ? "APPROVED" : "NOT_SUBMITTED",
       minBudget: r.minBudget,
       maxBudget: r.maxBudget,
       preferredLocations: r.preferredLocations,

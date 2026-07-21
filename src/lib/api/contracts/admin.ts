@@ -167,7 +167,7 @@ export type AdminPropertyReviewDetail = z.infer<typeof AdminPropertyReviewDetail
 export const AdminTenantRequestDetailSchema = z.object({
   id: z.string(),
   tenantName: z.string(),
-  tenantVerified: z.boolean(),
+  tenantVerificationStatus: z.string(),
   minBudget: z.number(),
   maxBudget: z.number(),
   preferredLocations: z.string(),
