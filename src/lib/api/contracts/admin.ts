@@ -130,6 +130,34 @@ export const KycReviewDetailSchema = z.object({
 });
 export type KycReviewDetail = z.infer<typeof KycReviewDetailSchema>;
 
+/** Safe, admin-only projection used to moderate a property listing. */
+export const AdminPropertyReviewDetailSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  description: z.string(),
+  governorate: z.string(),
+  city: z.string(),
+  district: z.string(),
+  manualAddress: z.string(),
+  propertyType: PropertyTypeSchema,
+  rentAmount: z.number(),
+  areaM2: z.number(),
+  bedrooms: z.number().int(),
+  bathrooms: z.number().int(),
+  isFurnished: z.boolean(),
+  hasElevator: z.boolean(),
+  hasParking: z.boolean(),
+  propertyAroundServices: z.string().nullable(),
+  status: ModerationStatusSchema,
+  createdAt: z.string(),
+  images: z.array(z.object({
+    id: z.string(), imageUrl: z.string(), displayOrder: z.number().int(), isCover: z.boolean(),
+  })),
+  ownerName: z.string(),
+  ownerVerificationStatus: z.string(),
+});
+export type AdminPropertyReviewDetail = z.infer<typeof AdminPropertyReviewDetailSchema>;
+
 /**
  * Tenant-request moderation detail (PRO-08). The admin *does* see the tenant's
  * identity here — unlike a landlord browsing — because catching PII the tenant
