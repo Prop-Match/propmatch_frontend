@@ -40,6 +40,9 @@ export const SentOfferSchema = z.object({
   proposedPrice: z.number(),
   status: OfferStatusSchema,
   createdAt: z.string(),
+  tenantName: z.string().nullable(),
+  tenantPhoneNumber: z.string().nullable(),
+  matchConnectionId: z.string().nullable(),
 });
 export type SentOffer = z.infer<typeof SentOfferSchema>;
 
@@ -59,6 +62,8 @@ export const ReceivedOfferSchema = z.object({
   /** Populated only once status === ACCEPTED. */
   ownerName: z.string().nullable(),
   ownerPhoneNumber: z.string().nullable(),
+  manualAddress: z.string().nullable(),
+  matchConnectionId: z.string().nullable(),
 });
 export type ReceivedOffer = z.infer<typeof ReceivedOfferSchema>;
 
