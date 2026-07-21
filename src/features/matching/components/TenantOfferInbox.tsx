@@ -110,7 +110,7 @@ function OfferCard({ offer, onAccepted }: { offer: ReceivedOffer; onAccepted: ()
       </div>
 
       {offer.status === "ACCEPTED" && offer.ownerName && offer.ownerPhoneNumber ? (
-        <ContactRevealCard ownerName={offer.ownerName} ownerPhoneNumber={offer.ownerPhoneNumber} manualAddress={offer.manualAddress} />
+        <> <ContactRevealCard ownerName={offer.ownerName} ownerPhoneNumber={offer.ownerPhoneNumber} manualAddress={offer.manualAddress} /> {offer.matchConnectionId && <Link href={`/tenant/messages/${offer.matchConnectionId}`}><Button>??? ????????</Button></Link>} </>
       ) : offer.status === "REJECTED" ? (
         <p className="text-small text-muted">رفضت هذا العرض.</p>
       ) : (

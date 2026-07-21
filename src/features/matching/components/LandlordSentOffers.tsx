@@ -84,11 +84,12 @@ function SentOfferRow({ offer }: { offer: SentOffer }) {
         <span className="text-body font-bold text-primary">{formatEGP(offer.proposedPrice)}</span>
       </div>
 
-      {offer.status === "ACCEPTED" && offer.tenantName && offer.tenantPhoneNumber && (
+      {offer.status === "ACCEPTED" && offer.tenantName && offer.tenantPhoneNumber && (<>
         <p className="rounded-control bg-success-tint px-3 py-2 text-caption font-semibold text-success">
           {offer.tenantName} ? {offer.tenantPhoneNumber}
         </p>
-      )}
+        {offer.matchConnectionId && <Link href={`/landlord/messages/${offer.matchConnectionId}`}><Button>??? ????????</Button></Link>}
+      </>)}
     </article>
   );
 }
