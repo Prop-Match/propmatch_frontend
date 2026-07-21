@@ -71,13 +71,13 @@ export function useStreamOptimizeDescription(propertyId = "draft") {
   const [isStreaming, setIsStreaming] = useState(false);
 
   const run = useCallback(
-    async (description: string, onToken: (soFar: string) => void): Promise<void> => {
+    async (description: string, context: Record<string, any>, onToken: (soFar: string) => void): Promise<void> => {
       setIsStreaming(true);
       let text = "";
       try {
         await streamPost(
           `landlord/properties/${propertyId}/optimize-description/stream`,
-          { description },
+          { description, ...context },
           {
             onToken: (token) => {
               text += token;

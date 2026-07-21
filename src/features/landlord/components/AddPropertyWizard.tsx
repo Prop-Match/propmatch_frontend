@@ -234,8 +234,9 @@ function DescriptionStep({ form }: StepProps) {
   async function runOptimize() {
     const original = description || "عقار للإيجار";
     setPrevious(original);
+    const { description: _desc, images: _images, ...context } = form.getValues();
     try {
-      await optimize.run(original, (soFar) =>
+      await optimize.run(original, context, (soFar) =>
         form.setValue("description", soFar, { shouldValidate: false }),
       );
       form.trigger("description");
