@@ -30,6 +30,7 @@ export function NotificationBell() {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const qc = useQueryClient();
+  const notificationsEnabled = process.env.NEXT_PUBLIC_NOTIFICATIONS_ENABLED !== "false";
 
   // PRO-06: live over the socket; polls only while it's down.
   const refetchInterval = usePollWhileOffline(20_000);
@@ -37,7 +38,8 @@ export function NotificationBell() {
   const { data } = useQuery({
     queryKey: ["notifications"],
     queryFn: () => api.get<NotificationsResponse>("notifications"),
-    refetchInterval,
+    enabled: notificationsEnabled,
+    refetchInterval: notificationsEnabled ? refetchInterval : false,
   });
 
   // Read state is server-owned — the old build only flipped a local flag, so

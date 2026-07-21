@@ -665,13 +665,11 @@ export function tokensFor(user: MockUser) {
 }
 
 /**
- * Derives the 5-state UI status from the 3 persisted ones
- * (docs/analysis/conflicts.md A5).
+ * `NOT_SUBMITTED` is the only derived state: it means no verification row.
  */
 export function verificationStatusFor(userId: string) {
   const v = db.verifications.find((x) => x.userId === userId);
   if (!v) return "NOT_SUBMITTED" as const;
-  if (v.status === "REJECTED" && v.rejectionReason) return "RESUBMISSION_REQUIRED" as const;
   return v.status;
 }
 

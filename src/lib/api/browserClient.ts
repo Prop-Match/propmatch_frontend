@@ -21,10 +21,13 @@ function makeError(statusCode: number, message: string, body: unknown): ApiClien
 }
 
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
+  const isFormData = body instanceof FormData;
   const res = await fetch(path, {
     method,
-    headers: body !== undefined ? { "Content-Type": "application/json" } : undefined,
-    body: body !== undefined ? JSON.stringify(body) : undefined,
+    headers: body !== undefined && !isFormData ? { "Content-Type": "application/json" } : undefined,
+    // FormData deliberately has no manually supplied Content-Type: fetch adds
+    // the multipart boundary required by the backend.
+    body: body !== undefined ? (isFormData ? body : JSON.stringify(body)) : undefined,
   });
 
   const data = res.status === 204 ? null : await res.json().catch(() => null);
@@ -46,6 +49,7 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
 export const api = {
   get: <T>(path: string) => request<T>("GET", `/api/backend/${path}`),
   post: <T>(path: string, body?: unknown) => request<T>("POST", `/api/backend/${path}`, body),
+  postForm: <T>(path: string, body: FormData) => request<T>("POST", `/api/backend/${path}`, body),
   patch: <T>(path: string, body?: unknown) => request<T>("PATCH", `/api/backend/${path}`, body),
   delete: <T>(path: string) => request<T>("DELETE", `/api/backend/${path}`),
 };

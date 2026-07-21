@@ -41,15 +41,8 @@ export const UserSchema = z.object({
   email: z.string().email(),
   phoneNumber: z.string(),
   role: AccountRoleSchema,
-  isActive: z.boolean(),
-  lastLoginAt: z.string().nullable(),
   createdAt: z.string(),
-  updatedAt: z.string(),
-  /**
-   * Derived convenience field joined from `IDENTITY_VERIFICATION` so every
-   * surface can apply the progressive-verification gates (SRS 3.1/3.4)
-   * without a second request. `NOT_SUBMITTED` = no verification row exists.
-   */
+  /** Canonical lifecycle value; GET /verification/me remains the gate source. */
   verificationStatus: VerificationStatusSchema,
 });
 export type User = z.infer<typeof UserSchema>;
@@ -58,10 +51,46 @@ export type User = z.infer<typeof UserSchema>;
 export const AuthResponseSchema = z.object({ user: UserSchema });
 export type AuthResponse = z.infer<typeof AuthResponseSchema>;
 
-/** Shape returned by the backend; consumed only inside app/api/auth/*. */
-export const BackendAuthTokensSchema = z.object({
-  accessToken: z.string(),
-  refreshToken: z.string(),
-  user: UserSchema,
+/** Shape returned by Nest; consumed only inside app/api/auth/*. */
+const BackendUserSchema = z.object({
+  id: z.string(),
+  fullName: z.string(),
+  email: z.string().email(),
+  phoneNumber: z.string(),
+  role: AccountRoleSchema,
+  isActive: z.boolean().optional(),
+  lastLoginAt: z.string().nullable().optional(),
+  createdAt: z.string(),
+  updatedAt: z.string().optional(),
+  verificationStatus: VerificationStatusSchema,
 });
+
+export const BackendUserResponseSchema = BackendUserSchema.transform((user): User => ({
+  id: user.id,
+  fullName: user.fullName,
+  email: user.email,
+  phoneNumber: user.phoneNumber,
+  role: user.role,
+  createdAt: user.createdAt,
+  verificationStatus: user.verificationStatus,
+}));
+
+export const BackendMeResponseSchema = z.union([
+  BackendUserResponseSchema,
+  z.object({ user: BackendUserResponseSchema }).transform(({ user }) => user),
+]);
+
+export const BackendAuthTokensSchema = z.object({
+  accessToken: z.string().optional(),
+  accesstoken: z.string().optional(),
+  refreshToken: z.string(),
+  user: BackendUserResponseSchema,
+}).refine((tokens) => Boolean(tokens.accessToken ?? tokens.accesstoken), {
+  message: "Backend auth response must include an access token.",
+  path: ["accessToken"],
+}).transform((tokens) => ({
+  accessToken: tokens.accessToken ?? tokens.accesstoken!,
+  refreshToken: tokens.refreshToken,
+  user: tokens.user,
+}));
 export type BackendAuthTokens = z.infer<typeof BackendAuthTokensSchema>;

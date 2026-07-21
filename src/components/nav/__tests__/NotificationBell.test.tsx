@@ -17,6 +17,7 @@ jest.mock("@/src/lib/socket/RealtimeProvider", () => ({
 
 const mockGet = jest.fn();
 const mockPost = jest.fn();
+const originalNotificationsEnabled = process.env.NEXT_PUBLIC_NOTIFICATIONS_ENABLED;
 jest.mock("@/src/lib/api/browserClient", () => ({
   api: {
     get: (...args: unknown[]) => mockGet(...args),
@@ -47,11 +48,29 @@ function renderBell() {
 }
 
 beforeEach(() => {
+  process.env.NEXT_PUBLIC_NOTIFICATIONS_ENABLED = "true";
   mockGet.mockReset();
   mockPost.mockReset().mockResolvedValue({ ok: true });
 });
 
+afterEach(() => {
+  if (originalNotificationsEnabled === undefined) {
+    delete process.env.NEXT_PUBLIC_NOTIFICATIONS_ENABLED;
+  } else {
+    process.env.NEXT_PUBLIC_NOTIFICATIONS_ENABLED = originalNotificationsEnabled;
+  }
+});
+
 describe("NotificationBell", () => {
+  it("does not poll or show an unread count when real-backend notifications are disabled", async () => {
+    process.env.NEXT_PUBLIC_NOTIFICATIONS_ENABLED = "false";
+    renderBell();
+    await userEvent.click(screen.getByRole("button", { name: "الإشعارات" }));
+    expect(mockGet).not.toHaveBeenCalled();
+    expect(screen.queryByText(/غير مقروء/)).not.toBeInTheDocument();
+    expect(screen.getByText("لا توجد إشعارات جديدة")).toBeInTheDocument();
+  });
+
   it("renders every NOTIFICATION.type in the ERD enum without crashing", async () => {
     // The regression: one unmapped type = an undefined icon = a thrown render.
     const items = NotificationTypeSchema.options.map((type, i) =>

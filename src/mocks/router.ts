@@ -1,5 +1,5 @@
 import type { LoginRequest, RegisterRequest } from "@/src/lib/api/contracts/auth";
-import type { KycDocument, KycSubmitRequest } from "@/src/lib/api/contracts/verification";
+import type { KycDocument } from "@/src/lib/api/contracts/verification";
 import type { CreatePropertyRequest } from "@/src/lib/api/contracts/property";
 import type { CreateTenantRequest } from "@/src/lib/api/contracts/tenantRequest";
 import type { CreateOfferRequest } from "@/src/lib/api/contracts/offer";
@@ -384,18 +384,16 @@ export function dispatch(
   }
 
   /* ------------------------- verification (PRO-03) ------------------------ */
-  if (method === "GET" && path === "/verification") {
+  if (method === "GET" && path === "/verification/me") {
     if (!user) return unauth();
     const v = db.verifications.find((x) => x.userId === user.id);
     const status = verificationStatusFor(user.id);
     return ok({
       status,
-      uploadedDocuments: v ? (["national_id_front", "national_id_back", "selfie"] as KycDocument[]) : [],
-      nationalIdLast4: v ? v.nationalId.slice(-4) : null,
-      rejectionReason: v?.rejectionReason ?? null,
+      rejectionReason: status === "REJECTED" || status === "RESUBMISSION_REQUIRED" ? v?.rejectionReason ?? null : null,
       submittedAt: v?.submittedAt ?? null,
       reviewedAt: v?.reviewedAt ?? null,
-      canSubmit: status === "NOT_SUBMITTED" || status === "REJECTED" || status === "RESUBMISSION_REQUIRED",
+      canSubmit: status === "NOT_SUBMITTED" || status === "RESUBMISSION_REQUIRED",
     });
   }
   if (method === "POST" && path === "/verification/upload") {
@@ -409,13 +407,25 @@ export function dispatch(
   if (method === "POST" && path === "/verification/submit") {
     if (!user) return unauth();
     const status = verificationStatusFor(user.id);
-    if (status === "APPROVED") return codedErr(409, "ALREADY_VERIFIED", "تم توثيق هذا الحساب بالفعل");
-    if (status === "PENDING") return codedErr(409, "VERIFICATION_PENDING", "طلبك قيد المراجعة بالفعل");
-    const b = body as KycSubmitRequest;
+    if (status === "APPROVED") return codedErr(409, "ALREADY_VERIFIED", "تم توثيق الهوية بالفعل.");
+    if (status === "PENDING") return codedErr(409, "VERIFICATION_PENDING", "طلب التحقق قيد المراجعة بالفعل.");
+    if (status === "REJECTED") return codedErr(409, "VERIFICATION_FORBIDDEN", "لا يمكن إعادة إرسال طلب التحقق في حالته الحالية.");
+    if (!(body instanceof FormData)) {
+      return codedErr(400, "INVALID_VERIFICATION_SUBMISSION", "Required verification documents are missing.");
+    }
+    const nationalId = body.get("nationalId");
+    const nationalIdFront = body.get("nationalIdFront");
+    const nationalIdBack = body.get("nationalIdBack");
+    const selfie = body.get("selfie");
+    const isFileEntry = (value: FormDataEntryValue | null): value is File => value !== null && typeof value !== "string";
+    if (!isFileEntry(nationalIdFront) || !isFileEntry(nationalIdBack) || !isFileEntry(selfie)) {
+      return codedErr(400, "INVALID_VERIFICATION_SUBMISSION", "Required verification documents are missing.");
+    }
+    const providedNationalId = typeof nationalId === "string" ? nationalId : undefined;
     const existing = db.verifications.find((x) => x.userId === user.id);
     if (existing) {
       // Resubmission after rejection: reuse the row, back to PENDING.
-      existing.nationalId = b.nationalId;
+      existing.nationalId = providedNationalId ?? existing.nationalId;
       existing.status = "PENDING";
       existing.rejectionReason = null;
       existing.reviewedBy = null;
@@ -426,7 +436,7 @@ export function dispatch(
       const created: MockVerification = {
         id: nextId("ekyc"),
         userId: user.id,
-        nationalId: b.nationalId,
+        nationalId: providedNationalId ?? "",
         nationalIdFrontUrl: "https://cdn.example.com/id-front.jpg",
         nationalIdBackUrl: "https://cdn.example.com/id-back.jpg",
         selfieUrl: "https://cdn.example.com/selfie.jpg",
@@ -439,7 +449,14 @@ export function dispatch(
       db.verifications.push(created);
       announceQueueItem(kycQueueItem(created));
     }
-    return ok();
+    const updated = db.verifications.find((x) => x.userId === user.id)!;
+    return ok({
+      status: "PENDING",
+      rejectionReason: null,
+      submittedAt: updated.submittedAt,
+      reviewedAt: null,
+      canSubmit: false,
+    });
   }
 
   /* -------------------- properties: browse (PRO-11) ---------------------- */

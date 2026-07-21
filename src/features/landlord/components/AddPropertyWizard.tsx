@@ -17,6 +17,7 @@ import { PaymentSheet } from "@/src/features/payments/PaymentSheet";
 import { cn } from "@/src/utils/cn";
 import { propertyTypeLabels, type PropertyType } from "@/src/lib/api/contracts/property";
 import type { PaymentType } from "@/src/lib/api/contracts/payment";
+import { VerificationGate } from "@/src/features/ekyc/components/VerificationGate";
 
 const steps = ["الموقع", "النوع", "التفاصيل", "الوصف"] as const;
 type StepKey = keyof typeof stepFields;
@@ -42,6 +43,14 @@ const defaults: Partial<AddPropertyForm> = {
 };
 
 export function AddPropertyWizard() {
+  return (
+    <VerificationGate verificationPath="/landlord/verify">
+      <AddPropertyWizardContent />
+    </VerificationGate>
+  );
+}
+
+function AddPropertyWizardContent() {
   const router = useRouter();
   const toast = useToast();
   const quota = useQuota();
@@ -68,8 +77,7 @@ export function AddPropertyWizard() {
       },
       onError: (e) => {
         if (e.code === "VERIFICATION_REQUIRED") {
-          toast("info", "وثّق هويتك أولًا لنشر إعلانك");
-          router.push("/landlord/verify");
+          toast("info", e.message);
         } else if (e.code === "QUOTA_EXHAUSTED") {
           setPaywall(e.paymentType ?? "NEW_LISTING");
         } else {

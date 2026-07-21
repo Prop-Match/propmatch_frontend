@@ -122,10 +122,10 @@ export type ReviewDecision = z.infer<typeof ReviewDecisionSchema>;
 export const KycReviewDetailSchema = z.object({
   userId: z.string(),
   userName: z.string(),
-  nationalId: z.string(),
-  nationalIdFrontUrl: z.string(),
-  nationalIdBackUrl: z.string(),
-  selfieUrl: z.string(),
+  nationalId: z.string().nullable(),
+  nationalIdFrontUrl: z.string().url().refine((value) => /^https?:\/\//.test(value)),
+  nationalIdBackUrl: z.string().url().refine((value) => /^https?:\/\//.test(value)),
+  selfieUrl: z.string().url().refine((value) => /^https?:\/\//.test(value)),
   submittedAt: z.string(),
 });
 export type KycReviewDetail = z.infer<typeof KycReviewDetailSchema>;
@@ -202,6 +202,8 @@ export type AdminTeamMember = z.infer<typeof AdminTeamMemberSchema>;
 export const CreateAdminRequestSchema = z.object({
   fullName: z.string().min(2, "الاسم مطلوب"),
   email: z.string().email("بريد إلكتروني غير صالح"),
+  phoneNumber: z.string().regex(/^0(10|11|12|15)\d{8}$/, "رقم هاتف مصري غير صالح"),
+  password: z.string().min(8, "كلمة المرور يجب أن لا تقل عن 8 أحرف"),
   role: AdminRoleSchema,
 });
 export type CreateAdminRequest = z.infer<typeof CreateAdminRequestSchema>;

@@ -10,6 +10,7 @@ import type { PaymentType } from "./contracts/payment";
  * the backend already made, never pre-empts it.
  */
 export interface ActionError {
+  statusCode?: number;
   code?: string;
   paymentType?: PaymentType;
   message: string;
@@ -18,12 +19,12 @@ export interface ActionError {
 export function toActionError(e: unknown): ActionError {
   if (isApiClientError(e)) {
     const body = e.body as { code?: string; paymentType?: PaymentType } | null;
-    return { code: body?.code, paymentType: body?.paymentType, message: e.message };
+    return { statusCode: e.statusCode, code: body?.code, paymentType: body?.paymentType, message: e.message };
   }
   return { message: "تعذر إتمام العملية، حاول مرة أخرى" };
 }
 
 export const isVerificationRequired = (e: ActionError | null | undefined) =>
-  e?.code === "VERIFICATION_REQUIRED";
+  e?.statusCode === 403 && e.code === "VERIFICATION_REQUIRED";
 
 export const isQuotaExhausted = (e: ActionError | null | undefined) => e?.code === "QUOTA_EXHAUSTED";
