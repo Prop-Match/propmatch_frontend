@@ -7,7 +7,7 @@ const items = [
   { href: "/landlord", label: "عقاراتي", Icon: LayoutDashboard },
   { href: "/landlord/requests", label: "طلبات المستأجرين", Icon: Users },
   { href: "/landlord/offers", label: "عروضي", Icon: Send },
-    { href: "/landlord/messages", label: "???????", Icon: MessageCircle },
+    { href: "/landlord/messages", label: "الرسائل", Icon: MessageCircle },
 { href: "/profile", label: "حسابي", Icon: UserIcon },
 ];
 

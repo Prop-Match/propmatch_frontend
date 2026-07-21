@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Bell, BellOff, BadgeCheck, Home, Sparkles, Star, CreditCard, FileText, Inbox } from "lucide-react";
+import { Bell, BellOff, BadgeCheck, Home, Sparkles, Star, CreditCard, FileText, Inbox, MessageCircle } from "lucide-react";
 import { api } from "@/src/lib/api/browserClient";
 import { cn } from "@/src/utils/cn";
 import { formatNumber, formatRelativeTime } from "@/src/utils/format";
@@ -24,6 +24,7 @@ const typeIcon: Record<NotificationType, typeof Bell> = {
   REVIEW_APPROVED: Star,
   NEW_TENANT_REQUEST: FileText,
   NEW_OFFER_RECEIVED: Inbox,
+  NEW_MESSAGE: MessageCircle,
 };
 
 export function NotificationBell() {

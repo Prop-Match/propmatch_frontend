@@ -16,6 +16,7 @@ export const NotificationTypeSchema = z.enum([
   "REVIEW_APPROVED",
   "NEW_TENANT_REQUEST",
   "NEW_OFFER_RECEIVED",
+  "NEW_MESSAGE",
 ]);
 export type NotificationType = z.infer<typeof NotificationTypeSchema>;
 
@@ -43,4 +44,5 @@ export const SOCKET_EVENTS = {
   notification: "notification",
   /** A new item entered an admin moderation queue. */
   adminQueueItem: "admin:queue:item",
+  message: "message",
 } as const;

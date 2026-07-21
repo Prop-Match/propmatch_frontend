@@ -6,6 +6,7 @@ import { io, type Socket } from "socket.io-client";
 import { SOCKET_EVENTS } from "@/src/lib/api/contracts/notification";
 import type { Notification, NotificationsResponse } from "@/src/lib/api/contracts/notification";
 import type { AdminQueuesResponse, QueueItem } from "@/src/lib/api/contracts/admin";
+import type { MatchMessage, RealtimeMatchMessage } from "@/src/lib/api/contracts/message";
 
 /**
  * PRO-06 realtime client.
@@ -24,6 +25,25 @@ import type { AdminQueuesResponse, QueueItem } from "@/src/lib/api/contracts/adm
 const SOCKET_URL = process.env.NEXT_PUBLIC_SOCKET_URL;
 
 let socket: Socket | null = null;
+
+function playMessageAlert(): void {
+  try {
+    const AudioContextConstructor = window.AudioContext;
+    if (!AudioContextConstructor) return;
+    const context = new AudioContextConstructor();
+    const oscillator = context.createOscillator();
+    const gain = context.createGain();
+    oscillator.frequency.value = 880;
+    gain.gain.setValueAtTime(0.04, context.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, context.currentTime + 0.16);
+    oscillator.connect(gain).connect(context.destination);
+    oscillator.start();
+    oscillator.stop(context.currentTime + 0.16);
+    oscillator.addEventListener("ended", () => void context.close());
+  } catch {
+    // Browsers may block audio before a user interaction; the bell still updates.
+  }
+}
 
 /** One shared connection per tab, regardless of how many components subscribe. */
 function getSocket(): Socket | null {
@@ -84,6 +104,7 @@ export function useRealtime(): RealtimeState {
         if (prev.items.some((x) => x.id === n.id)) return prev;
         return { items: [n, ...prev.items].slice(0, 20), unread: prev.unread + 1 };
       });
+      if (n.type === "NEW_MESSAGE") playMessageAlert();
     };
 
     const onQueueItem = (item: QueueItem) => {
@@ -96,11 +117,30 @@ export function useRealtime(): RealtimeState {
       });
     };
 
+    const onMessage = (message: RealtimeMatchMessage) => {
+      qc.setQueryData<MatchMessage[]>(["matches", message.matchConnectionId, "messages"], (prev) => {
+        if (!prev || prev.some((item) => item.id === message.id)) return prev;
+        return [
+          ...prev,
+          {
+            id: message.id,
+            senderId: message.senderId,
+            body: message.body,
+            createdAt: message.createdAt,
+            isMine: false,
+          },
+        ];
+      });
+      qc.invalidateQueries({ queryKey: ["matches"] });
+    };
+
     s.on(SOCKET_EVENTS.notification, onNotification);
     s.on(SOCKET_EVENTS.adminQueueItem, onQueueItem);
+    s.on(SOCKET_EVENTS.message, onMessage);
     return () => {
       s.off(SOCKET_EVENTS.notification, onNotification);
       s.off(SOCKET_EVENTS.adminQueueItem, onQueueItem);
+      s.off(SOCKET_EVENTS.message, onMessage);
     };
   }, [qc]);
 

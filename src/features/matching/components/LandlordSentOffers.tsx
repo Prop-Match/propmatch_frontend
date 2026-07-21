@@ -88,7 +88,7 @@ function SentOfferRow({ offer }: { offer: SentOffer }) {
         <p className="rounded-control bg-success-tint px-3 py-2 text-caption font-semibold text-success">
           {offer.tenantName} ? {offer.tenantPhoneNumber}
         </p>
-        {offer.matchConnectionId && <Link href={`/landlord/messages/${offer.matchConnectionId}`}><Button>??? ????????</Button></Link>}
+        {offer.matchConnectionId && <Link href={`/landlord/messages/${offer.matchConnectionId}`}><Button>فتح المحادثة</Button></Link>}
       </>)}
     </article>
   );
