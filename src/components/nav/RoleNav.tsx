@@ -1,11 +1,12 @@
 "use client";
 
+import { Logo } from "@/src/components/ui/Logo";
+import { useHideOnScroll } from "@/src/hooks/useHideOnScroll";
+import { useSessionUiStore } from "@/src/lib/store/useSessionUiStore";
+import { cn } from "@/src/utils/cn";
+import { Bell } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Bell } from "lucide-react";
-import { cn } from "@/src/utils/cn";
-import { useSessionUiStore } from "@/src/lib/store/useSessionUiStore";
-import { useHideOnScroll } from "@/src/hooks/useHideOnScroll";
 
 export interface NavItem {
   href: string;
@@ -36,9 +37,7 @@ export function RoleNav({
       {/* Desktop top nav */}
       <header className="sticky top-0 z-30 hidden border-b border-hairline bg-surface/90 backdrop-blur md:block">
         <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3">
-          <Link href="/" className="text-h2 font-bold text-primary">
-            {brand}
-          </Link>
+          <Logo href="/" />
           <nav className="flex items-center gap-1">
             {items.map(({ href, label, Icon }) => (
               <Link

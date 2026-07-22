@@ -1,23 +1,24 @@
 "use client";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
-import { useForm, Controller, type UseFormReturn } from "react-hook-form";
-import { zodResolver } from "@hookform/resolvers/zod";
-import { Sparkles, Check, ArrowLeft, ArrowRight, Undo2 } from "lucide-react";
-import { addPropertyFormSchema, stepFields, type AddPropertyForm } from "../validation/schemas";
-import { useCreateProperty, useQuota, useStreamOptimizeDescription } from "../hooks/useLandlord";
-import type { ActionError } from "@/src/lib/api/actionError";
-import { InputField, TextAreaField } from "@/src/components/ui/Field";
-import { ChipGroup } from "@/src/components/ui/Chip";
 import { Button } from "@/src/components/ui/Button";
+import { ChipGroup } from "@/src/components/ui/Chip";
+import { InputField, SelectField, TextAreaField } from "@/src/components/ui/Field";
 import { QuotaChip } from "@/src/components/ui/QuotaChip";
 import { useToast } from "@/src/components/ui/Toast";
-import { PaymentSheet } from "@/src/features/payments/PaymentSheet";
-import { cn } from "@/src/utils/cn";
-import { propertyTypeLabels, type PropertyType } from "@/src/lib/api/contracts/property";
-import type { PaymentType } from "@/src/lib/api/contracts/payment";
+import { useActiveRegions } from "@/src/features/admin/hooks/useRegions";
 import { VerificationGate } from "@/src/features/ekyc/components/VerificationGate";
+import { PaymentSheet } from "@/src/features/payments/PaymentSheet";
+import type { ActionError } from "@/src/lib/api/actionError";
+import type { PaymentType } from "@/src/lib/api/contracts/payment";
+import { propertyTypeLabels, type PropertyType } from "@/src/lib/api/contracts/property";
+import { cn } from "@/src/utils/cn";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { ArrowLeft, ArrowRight, Check, Sparkles, Undo2 } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { useState } from "react";
+import { Controller, useForm, type UseFormReturn } from "react-hook-form";
+import { useCreateProperty, useQuota, useStreamOptimizeDescription } from "../hooks/useLandlord";
+import { addPropertyFormSchema, stepFields, type AddPropertyForm } from "../validation/schemas";
 
 const steps = ["الموقع", "النوع", "التفاصيل", "الوصف"] as const;
 type StepKey = keyof typeof stepFields;
@@ -166,14 +167,118 @@ function Card({ children }: { children: React.ReactNode }) {
   return <div className="flex flex-col gap-4 rounded-card border border-hairline bg-surface p-5">{children}</div>;
 }
 
-function LocationStep({ form: { register, formState: { errors } } }: StepProps) {
+function LocationStep({ form: { watch, setValue, register, formState: { errors } } }: StepProps) {
+  const { data: activeCountries, isLoading } = useActiveRegions();
+
+  const selectedGovName = watch("governorate");
+  const selectedCityName = watch("city");
+
+  // Filter active governorates across active countries
+  const activeGovernorates =
+    activeCountries?.flatMap((c) => c.governorates.filter((g) => g.status)) ?? [];
+
+  // Find currently selected governorate
+  const currentGov = activeGovernorates.find(
+    (g) => g.nameAr === selectedGovName || g.nameEn === selectedGovName
+  );
+
+  // Active cities under selected governorate
+  const activeCities = currentGov?.cities.filter((city) => city.status) ?? [];
+
+  // Find currently selected city
+  const currentCity = activeCities.find(
+    (c) => c.nameAr === selectedCityName || c.nameEn === selectedCityName
+  );
+
+  // Active districts under selected city
+  const activeDistricts = currentCity?.districts?.filter((d) => d.status) ?? [];
+
+  const govOptions = activeGovernorates.map((g) => ({
+    value: g.nameAr,
+    label: `${g.nameAr} (${g.nameEn})`,
+  }));
+
+  const cityOptions = activeCities.map((c) => ({
+    value: c.nameAr,
+    label: `${c.nameAr} (${c.nameEn})`,
+  }));
+
+  const districtOptions = activeDistricts.map((d) => ({
+    value: d.nameAr,
+    label: `${d.nameAr} (${d.nameEn})`,
+  }));
+
+  const handleGovChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const newGov = e.target.value;
+    setValue("governorate", newGov, { shouldValidate: true });
+
+    const newGovObj = activeGovernorates.find(
+      (g) => g.nameAr === newGov || g.nameEn === newGov
+    );
+    const firstCityObj = newGovObj?.cities.filter((c) => c.status)[0];
+    const firstCity = firstCityObj?.nameAr ?? "";
+    setValue("city", firstCity, { shouldValidate: true });
+
+    const firstDistrict = firstCityObj?.districts?.filter((d) => d.status)[0]?.nameAr ?? "";
+    setValue("district", firstDistrict, { shouldValidate: true });
+  };
+
+  const handleCityChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const newCity = e.target.value;
+    setValue("city", newCity, { shouldValidate: true });
+
+    const newCityObj = activeCities.find(
+      (c) => c.nameAr === newCity || c.nameEn === newCity
+    );
+    const firstDistrict = newCityObj?.districts?.filter((d) => d.status)[0]?.nameAr ?? "";
+    setValue("district", firstDistrict, { shouldValidate: true });
+  };
+
   return (
     <Card>
       <div className="grid gap-3 sm:grid-cols-2">
-        <InputField label="المحافظة" {...register("governorate")} error={errors.governorate?.message} />
-        <InputField label="المدينة" {...register("city")} error={errors.city?.message} />
+        <SelectField
+          label="المحافظة"
+          options={govOptions}
+          placeholder={isLoading ? "جاري تحميل المحافظات..." : "اختر المحافظة"}
+          value={selectedGovName}
+          onChange={handleGovChange}
+          error={errors.governorate?.message}
+        />
+        <SelectField
+          label="المدينة"
+          options={cityOptions}
+          placeholder={
+            isLoading
+              ? "جاري تحميل المدن..."
+              : !selectedGovName
+              ? "اختر المحافظة أولاً"
+              : cityOptions.length === 0
+              ? "لا يوجد مدن متاحة"
+              : "اختر المدينة"
+          }
+          value={selectedCityName}
+          onChange={handleCityChange}
+          error={errors.city?.message}
+          disabled={!selectedGovName || cityOptions.length === 0}
+        />
       </div>
-      <InputField label="الحي" {...register("district")} error={errors.district?.message} />
+      {districtOptions.length > 0 ? (
+        <SelectField
+          label="الحي / المنطقة"
+          options={districtOptions}
+          placeholder="اختر الحي / المنطقة"
+          {...register("district")}
+          error={errors.district?.message}
+        />
+      ) : (
+        <InputField
+          label="الحي / المنطقة"
+          placeholder="مثال: حي الجامعة"
+          {...register("district")}
+          error={errors.district?.message}
+        />
+      )}
       <InputField
         label="العنوان التفصيلي"
         hint="لا يظهر للمستأجرين إلا بعد قبول العرض والتواصل."
