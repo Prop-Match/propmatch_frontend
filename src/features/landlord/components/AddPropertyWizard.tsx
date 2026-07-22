@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useForm, Controller, type UseFormReturn } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -22,6 +22,12 @@ import { VerificationGate } from "@/src/features/ekyc/components/VerificationGat
 const steps = ["الموقع", "النوع", "التفاصيل", "الوصف"] as const;
 type StepKey = keyof typeof stepFields;
 const stepKeys: StepKey[] = ["location", "type", "details", "description"];
+const PROPERTY_DRAFT_STORAGE_KEY = "propmatch:add-property-draft";
+
+type PropertyDraft = {
+  step: number;
+  values: Partial<AddPropertyForm>;
+};
 
 const defaults: Partial<AddPropertyForm> = {
   governorate: "الدقهلية",
@@ -60,8 +66,49 @@ function AddPropertyWizardContent() {
     mode: "onTouched",
   });
   const [step, setStep] = useState(0);
+  const [draftRestored, setDraftRestored] = useState(false);
   const create = useCreateProperty();
   const [paywall, setPaywall] = useState<PaymentType | null>(null);
+
+  useEffect(() => {
+    try {
+      const savedDraft = window.localStorage.getItem(PROPERTY_DRAFT_STORAGE_KEY);
+      if (savedDraft) {
+        const draft = JSON.parse(savedDraft) as PropertyDraft;
+        if (draft.values && typeof draft.step === "number") {
+          form.reset({ ...defaults, ...draft.values });
+          setStep(Math.max(0, Math.min(draft.step, steps.length - 1)));
+        }
+      }
+    } catch {
+      window.localStorage.removeItem(PROPERTY_DRAFT_STORAGE_KEY);
+    } finally {
+      setDraftRestored(true);
+    }
+  }, [form]);
+
+  useEffect(() => {
+    if (!draftRestored) return;
+
+    const saveDraft = (values: Partial<AddPropertyForm>) => {
+      const valuesToPersist = { ...values };
+      delete valuesToPersist.images;
+      const draft: PropertyDraft = { step, values: valuesToPersist };
+      try {
+        window.localStorage.setItem(
+          PROPERTY_DRAFT_STORAGE_KEY,
+          JSON.stringify(draft),
+        );
+      } catch {
+        // A full or unavailable browser storage must not block form use.
+      }
+    };
+    saveDraft(form.getValues());
+    const subscription = form.watch((values) => {
+      saveDraft(values);
+    });
+    return () => subscription.unsubscribe();
+  }, [draftRestored, form, step]);
 
   async function next() {
     const fields = stepFields[stepKeys[step]] as unknown as (keyof AddPropertyForm)[];
@@ -71,6 +118,7 @@ function AddPropertyWizardContent() {
   function submit(values: AddPropertyForm) {
     create.mutate(values, {
       onSuccess: () => {
+        window.localStorage.removeItem(PROPERTY_DRAFT_STORAGE_KEY);
         // ERD: PROPERTY.status defaults to PENDING — admin must approve (PRO-04).
         toast("success", "تم إرسال إعلانك للمراجعة");
         router.push("/landlord");
@@ -308,7 +356,7 @@ function DescriptionStep({ form }: StepProps) {
 const Toggle = function Toggle({ label, ...rest }: React.InputHTMLAttributes<HTMLInputElement> & { label: string }) {
   return (
     <label className="flex cursor-pointer items-center gap-2 text-small text-body-text">
-      <input type="checkbox" className="size-4 accent-[var(--color-primary)]" {...rest} />
+      <input type="checkbox" className="size-4 accent-primary" {...rest} />
       {label}
     </label>
   );

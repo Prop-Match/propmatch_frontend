@@ -116,7 +116,7 @@ export function AdminTicketDetail({ id }: { id: string }) {
         />
         <div className="flex items-center justify-between">
           <label className="flex cursor-pointer items-center gap-1.5 text-small text-body-text">
-            <input type="checkbox" checked={internal} onChange={(e) => setInternal(e.target.checked)} className="size-4 accent-[var(--color-primary)]" />
+            <input type="checkbox" checked={internal} onChange={(e) => setInternal(e.target.checked)} className="size-4 accent-primary" />
             <StickyNote className="size-4 text-muted" aria-hidden />
             ملاحظة داخلية
           </label>

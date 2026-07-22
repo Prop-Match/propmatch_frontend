@@ -46,6 +46,16 @@ export function PaymentSheet({ open, onClose, paymentType, propertyId, onActivat
       const checkout =
         session ?? (await api.post<CheckoutSession>("payments/checkout", { paymentType, propertyId }));
       setSession(checkout);
+      if (checkout.iframeUrl) {
+        // Keep the order id so the return page can ask our backend to verify
+        // the transaction with Paymob after the customer leaves the checkout.
+        window.localStorage.setItem(
+          "propmatch:pending-payment",
+          JSON.stringify({ paymobOrderId: checkout.paymobOrderId }),
+        );
+        window.location.assign(checkout.iframeUrl);
+        return;
+      }
       const result = await api.post<{ status: string }>(`payments/${checkout.paymobOrderId}/confirm`, {
         cardNumber: cardNumber.replace(/\s/g, ""),
       });

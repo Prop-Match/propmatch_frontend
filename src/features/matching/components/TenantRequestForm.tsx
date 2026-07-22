@@ -139,7 +139,7 @@ function TenantRequestFormContent() {
             <label className="flex cursor-pointer items-end gap-2 pb-3 text-small text-body-text">
               <input
                 type="checkbox"
-                className="size-4 accent-[var(--color-primary)]"
+                className="size-4 accent-primary"
                 {...register("needsFurnished")}
               />
               أحتاج وحدة مفروشة
@@ -198,7 +198,7 @@ function FlexibilitySlider({ value, onChange }: { value: number; onChange: (v: n
         step={1}
         value={value}
         onChange={(e) => onChange(Number(e.target.value))}
-        className="w-full accent-[var(--color-primary)]"
+        className="w-full accent-primary"
       />
       <div className="flex justify-between text-caption text-muted">
         <span>شروطي ثابتة</span>
