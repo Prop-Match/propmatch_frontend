@@ -22,25 +22,31 @@ export function TenantBrowse() {
   const [semanticValidation, setSemanticValidation] = useState<string | null>(null);
   const [query, setQuery] = useState<PropertySearchQuery>({});
   const normalBrowse = useApprovedProperties(query);
-  const semanticSearch = useSemanticPropertySearch(semanticQuery, semanticSearchLimit);
+  const semanticSearch = useSemanticPropertySearch(
+    semanticQuery ? { query: semanticQuery, limit: semanticSearchLimit } : null,
+  );
   const isSemanticMode = semanticQuery !== null;
   const activeSearch = isSemanticMode ? semanticSearch : normalBrowse;
+  const trimmedSemanticInput = semanticInput.trim();
+  const semanticInputIsValid =
+    trimmedSemanticInput.length >= 2 && trimmedSemanticInput.length <= 300;
+
+  function semanticValidationMessage(value: string) {
+    if (value.length < 2) return "اكتب حرفين على الأقل للبحث.";
+    if (value.length > 300) return "يجب ألا يتجاوز وصف البحث 300 حرف.";
+    return null;
+  }
 
   function submitSemanticSearch(e: React.FormEvent) {
     e.preventDefault();
-    const trimmed = semanticInput.trim();
-
-    if (trimmed.length < 2) {
-      setSemanticValidation("اكتب حرفين على الأقل للبحث.");
-      return;
-    }
-    if (trimmed.length > 300) {
-      setSemanticValidation("يجب ألا يتجاوز وصف البحث 300 حرف.");
+    const validationMessage = semanticValidationMessage(trimmedSemanticInput);
+    if (validationMessage) {
+      setSemanticValidation(validationMessage);
       return;
     }
 
     setSemanticValidation(null);
-    setSemanticQuery(trimmed);
+    setSemanticQuery(trimmedSemanticInput);
   }
 
   function clearSemanticSearch() {
@@ -76,13 +82,18 @@ export function TenantBrowse() {
                 setSemanticInput(e.target.value);
                 if (semanticValidation) setSemanticValidation(null);
               }}
+              onBlur={() => setSemanticValidation(semanticValidationMessage(trimmedSemanticInput))}
               placeholder="مثال: شقة هادئة غرفتين قريبة من الجامعة وبميزانية متوسطة"
               aria-label="ابحث بوصف العقار الذي تحتاجه"
               aria-describedby={semanticValidation ? "semantic-search-validation" : undefined}
               className="w-full rounded-control border border-hairline bg-surface py-2.5 ps-10 pe-3 text-body focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
             />
           </div>
-          <Button type="submit" loading={semanticSearch.isFetching}>
+          <Button
+            type="submit"
+            disabled={!semanticInputIsValid}
+            loading={semanticSearch.isFetching}
+          >
             بحث ذكي
           </Button>
           {isSemanticMode && (
