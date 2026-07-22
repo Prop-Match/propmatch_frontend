@@ -35,6 +35,19 @@ export function useApprovedProperties(query: PropertySearchQuery) {
   });
 }
 
+/** Natural-language search for approved properties, triggered only on submit. */
+export function useSemanticPropertySearch(query: string | null, limit = 10) {
+  return useQuery({
+    queryKey: ["properties", "semantic-search", query, limit],
+    queryFn: () => {
+      const params = new URLSearchParams({ query: query ?? "", limit: String(limit) });
+      return api.get<Paginated<PropertySummary>>(`properties/search/semantic?${params.toString()}`);
+    },
+    enabled: query !== null,
+    retry: false,
+  });
+}
+
 export function useProperty(id: string) {
   return useQuery({
     queryKey: ["properties", id],
