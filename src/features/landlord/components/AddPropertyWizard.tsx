@@ -15,7 +15,7 @@ import { cn } from "@/src/utils/cn";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { ArrowLeft, ArrowRight, Check, Sparkles, Undo2 } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Controller, useForm, type UseFormReturn } from "react-hook-form";
 import { useCreateProperty, useQuota, useStreamOptimizeDescription } from "../hooks/useLandlord";
 import { addPropertyFormSchema, stepFields, type AddPropertyForm } from "../validation/schemas";
