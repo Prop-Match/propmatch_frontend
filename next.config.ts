@@ -3,6 +3,10 @@ import createNextIntlPlugin from "next-intl/plugin";
 
 const withNextIntl = createNextIntlPlugin("./i18n/request.ts");
 
+const backendOrigin = process.env.NESTJS_API_URL
+  ? process.env.NESTJS_API_URL.replace(/\/api\/?$/, "")
+  : "http://localhost:3001";
+
 const nextConfig: NextConfig = {
   turbopack: {
     root: process.cwd(),
@@ -12,6 +16,14 @@ const nextConfig: NextConfig = {
     // backend + storage (AWS S3 / Cloudflare R2 per the SRS) is wired in,
     // replace this with the actual asset host(s).
     remotePatterns: [{ protocol: "https", hostname: "images.unsplash.com" }],
+  },
+  async rewrites() {
+    return [
+      {
+        source: "/public/:path*",
+        destination: `${backendOrigin}/public/:path*`,
+      },
+    ];
   },
 };
 
