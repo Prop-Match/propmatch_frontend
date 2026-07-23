@@ -1,12 +1,3 @@
-import type { LoginRequest, RegisterRequest } from "@/src/lib/api/contracts/auth";
-import type { KycDocument } from "@/src/lib/api/contracts/verification";
-import type { CreatePropertyRequest } from "@/src/lib/api/contracts/property";
-import type { CreateTenantRequest } from "@/src/lib/api/contracts/tenantRequest";
-import type { CreateOfferRequest } from "@/src/lib/api/contracts/offer";
-import type { CreateCheckoutRequest, PaymentType } from "@/src/lib/api/contracts/payment";
-import type { CreateReviewRequest } from "@/src/lib/api/contracts/review";
-import type { CreatePartnerLeadRequest } from "@/src/lib/api/contracts/partnerLead";
-import type { CreateLeaseContract } from "@/src/lib/api/contracts/contract";
 import type {
   AdminRole,
   CreateAdminRequest,
@@ -14,9 +5,19 @@ import type {
   ReviewDecision,
   UpdateAdminRequest,
 } from "@/src/lib/api/contracts/admin";
-import { ROLE_CAPABILITIES, adminRoleLabels } from "@/src/lib/api/contracts/admin";
+import { adminRoleLabels, ROLE_CAPABILITIES } from "@/src/lib/api/contracts/admin";
+import type { LoginRequest, RegisterRequest } from "@/src/lib/api/contracts/auth";
 import type { Capability } from "@/src/lib/api/contracts/common";
+import type { CreateLeaseContract } from "@/src/lib/api/contracts/contract";
+import type { CreateOfferRequest } from "@/src/lib/api/contracts/offer";
+import type { CreatePartnerLeadRequest } from "@/src/lib/api/contracts/partnerLead";
+import type { PaymentType } from "@/src/lib/api/contracts/payment";
+import type { CreatePropertyRequest } from "@/src/lib/api/contracts/property";
+import type { CreateReviewRequest } from "@/src/lib/api/contracts/review";
 import type { AdminReplyRequest, ChatRequest, TicketStatus } from "@/src/lib/api/contracts/support";
+import type { CreateTenantRequest } from "@/src/lib/api/contracts/tenantRequest";
+import type { KycDocument } from "@/src/lib/api/contracts/verification";
+import { legalAnswer, optimizedDescription } from "./ai";
 import {
   audit,
   capabilitiesFor,
@@ -39,7 +40,6 @@ import {
   type MockVerification,
 } from "./db";
 import { emitMockEvent } from "./events";
-import { legalAnswer, optimizedDescription } from "./ai";
 
 /**
  * Framework-agnostic mock backend mirroring the Final ERD + SRS. Given a
@@ -59,8 +59,16 @@ export interface MockResponse {
 }
 
 const ok = (body: unknown = { ok: true }): MockResponse => ({ status: 200, body });
-const err = (status: number, message: string): MockResponse => ({ status, body: { statusCode: status, message } });
-const codedErr = (status: number, code: string, message: string, extra: Record<string, unknown> = {}): MockResponse => ({
+const err = (status: number, message: string): MockResponse => ({
+  status,
+  body: { statusCode: status, message },
+});
+const codedErr = (
+  status: number,
+  code: string,
+  message: string,
+  extra: Record<string, unknown> = {},
+): MockResponse => ({
   status,
   body: { statusCode: status, code, message, ...extra },
 });
@@ -73,7 +81,11 @@ const needsVerification = () =>
 
 /** Quota exhausted → paywall (PRO-18). */
 const quotaExhausted = (paymentType: PaymentType, priceEgp: number) =>
-  codedErr(403, "QUOTA_EXHAUSTED", "انتهت محاولاتك المجانية", { trigger: "payment", paymentType, priceEgp });
+  codedErr(403, "QUOTA_EXHAUSTED", "انتهت محاولاتك المجانية", {
+    trigger: "payment",
+    paymentType,
+    priceEgp,
+  });
 
 const PRICES: Record<PaymentType, number> = {
   NEW_LISTING: 100,
@@ -142,7 +154,12 @@ function toDetail(p: MockProperty, viewer: MockUser | null) {
     images: db.propertyImages
       .filter((i) => i.propertyId === p.id)
       .sort((a, b) => a.displayOrder - b.displayOrder)
-      .map((i) => ({ id: i.id, imageUrl: i.imageUrl, displayOrder: i.displayOrder, isCover: i.isCover })),
+      .map((i) => ({
+        id: i.id,
+        imageUrl: i.imageUrl,
+        displayOrder: i.displayOrder,
+        isCover: i.isCover,
+      })),
     contactRevealed: unlocked,
     // Omitted entirely until the gate passes.
     manualAddress: unlocked ? p.manualAddress : null,
@@ -297,7 +314,6 @@ function toTicketDetail(t: MockTicket) {
   };
 }
 
-
 /* -------------------------------- dispatch -------------------------------- */
 
 export function dispatch(
@@ -343,7 +359,8 @@ export function dispatch(
   }
   if (method === "POST" && path === "/auth/register") {
     const b = body as RegisterRequest;
-    if (db.users.some((x) => x.email === b.email)) return err(409, "هذا البريد الإلكتروني مسجّل بالفعل");
+    if (db.users.some((x) => x.email === b.email))
+      return err(409, "هذا البريد الإلكتروني مسجّل بالفعل");
     const u: MockUser = {
       id: nextId("usr"),
       fullName: b.fullName,
@@ -390,7 +407,10 @@ export function dispatch(
     const status = verificationStatusFor(user.id);
     return ok({
       status,
-      rejectionReason: status === "REJECTED" || status === "RESUBMISSION_REQUIRED" ? v?.rejectionReason ?? null : null,
+      rejectionReason:
+        status === "REJECTED" || status === "RESUBMISSION_REQUIRED"
+          ? (v?.rejectionReason ?? null)
+          : null,
       submittedAt: v?.submittedAt ?? null,
       reviewedAt: v?.reviewedAt ?? null,
       canSubmit: status === "NOT_SUBMITTED" || status === "RESUBMISSION_REQUIRED",
@@ -400,7 +420,11 @@ export function dispatch(
     if (!user) return unauth();
     const b = body as { document: KycDocument; simulateUnreadable?: boolean };
     if (b.simulateUnreadable) {
-      return ok({ document: b.document, accepted: false, reason: "تعذّرت قراءة المستند، ارفع صورة أوضح" });
+      return ok({
+        document: b.document,
+        accepted: false,
+        reason: "تعذّرت قراءة المستند، ارفع صورة أوضح",
+      });
     }
     return ok({ document: b.document, accepted: true, reason: null });
   }
@@ -408,18 +432,33 @@ export function dispatch(
     if (!user) return unauth();
     const status = verificationStatusFor(user.id);
     if (status === "APPROVED") return codedErr(409, "ALREADY_VERIFIED", "تم توثيق الهوية بالفعل.");
-    if (status === "PENDING") return codedErr(409, "VERIFICATION_PENDING", "طلب التحقق قيد المراجعة بالفعل.");
-    if (status === "REJECTED") return codedErr(409, "VERIFICATION_FORBIDDEN", "لا يمكن إعادة إرسال طلب التحقق في حالته الحالية.");
+    if (status === "PENDING")
+      return codedErr(409, "VERIFICATION_PENDING", "طلب التحقق قيد المراجعة بالفعل.");
+    if (status === "REJECTED")
+      return codedErr(
+        409,
+        "VERIFICATION_FORBIDDEN",
+        "لا يمكن إعادة إرسال طلب التحقق في حالته الحالية.",
+      );
     if (!(body instanceof FormData)) {
-      return codedErr(400, "INVALID_VERIFICATION_SUBMISSION", "Required verification documents are missing.");
+      return codedErr(
+        400,
+        "INVALID_VERIFICATION_SUBMISSION",
+        "Required verification documents are missing.",
+      );
     }
     const nationalId = body.get("nationalId");
     const nationalIdFront = body.get("nationalIdFront");
     const nationalIdBack = body.get("nationalIdBack");
     const selfie = body.get("selfie");
-    const isFileEntry = (value: FormDataEntryValue | null): value is File => value !== null && typeof value !== "string";
+    const isFileEntry = (value: FormDataEntryValue | null): value is File =>
+      value !== null && typeof value !== "string";
     if (!isFileEntry(nationalIdFront) || !isFileEntry(nationalIdBack) || !isFileEntry(selfie)) {
-      return codedErr(400, "INVALID_VERIFICATION_SUBMISSION", "Required verification documents are missing.");
+      return codedErr(
+        400,
+        "INVALID_VERIFICATION_SUBMISSION",
+        "Required verification documents are missing.",
+      );
     }
     const providedNationalId = typeof nationalId === "string" ? nationalId : undefined;
     const existing = db.verifications.find((x) => x.userId === user.id);
@@ -489,7 +528,8 @@ export function dispatch(
   if (method === "GET" && seg[0] === "properties" && seg.length === 2) {
     const p = db.properties.find((x) => x.id === seg[1]);
     if (!p) return err(404, "غير موجود");
-    if (p.status !== "APPROVED" && user?.id !== p.ownerId && user?.role !== "admin") return err(404, "غير موجود");
+    if (p.status !== "APPROVED" && user?.id !== p.ownerId && user?.role !== "admin")
+      return err(404, "غير موجود");
     return ok(toDetail(p, user));
   }
   if (method === "GET" && seg[0] === "properties" && seg[2] === "connection") {
@@ -503,7 +543,11 @@ export function dispatch(
       status: conn?.status ?? null,
       contact:
         unlocked && owner
-          ? { ownerName: owner.fullName, ownerPhoneNumber: owner.phoneNumber, manualAddress: p.manualAddress }
+          ? {
+              ownerName: owner.fullName,
+              ownerPhoneNumber: owner.phoneNumber,
+              manualAddress: p.manualAddress,
+            }
           : null,
     });
   }
@@ -532,7 +576,9 @@ export function dispatch(
   if (method === "GET" && seg[0] === "properties" && seg[2] === "reviews") {
     const approved = db.reviews.filter((r) => r.propertyId === seg[1] && r.status === "APPROVED");
     const total = approved.length;
-    const averageRating = total ? Number((approved.reduce((s, r) => s + r.rating, 0) / total).toFixed(1)) : null;
+    const averageRating = total
+      ? Number((approved.reduce((s, r) => s + r.rating, 0) / total).toFixed(1))
+      : null;
     return ok({
       items: approved.map((r) => ({
         id: r.id,
@@ -586,7 +632,8 @@ export function dispatch(
     if (user.role !== "landlord") return forbidden();
     if (!isVerified(user.id)) return needsVerification();
     const quota = quotaFor(user.id);
-    if (!quota || quota.freeListingsLeft <= 0) return quotaExhausted("NEW_LISTING", PRICES.NEW_LISTING);
+    if (!quota || quota.freeListingsLeft <= 0)
+      return quotaExhausted("NEW_LISTING", PRICES.NEW_LISTING);
 
     const b = body as CreatePropertyRequest;
     const property: MockProperty = {
@@ -630,11 +677,17 @@ export function dispatch(
     announceQueueItem(propertyQueueItem(property));
     return ok({ property: toDetail(property, user) });
   }
-  if (seg[0] === "landlord" && seg[1] === "properties" && seg[3] === "optimize-description" && method === "POST") {
+  if (
+    seg[0] === "landlord" &&
+    seg[1] === "properties" &&
+    seg[3] === "optimize-description" &&
+    method === "POST"
+  ) {
     if (!user) return unauth();
     if (user.role !== "landlord") return forbidden();
     const quota = quotaFor(user.id);
-    if (!quota || quota.optimizerUsesLeft <= 0) return quotaExhausted("REFILL_MATCHES", PRICES.REFILL_MATCHES);
+    if (!quota || quota.optimizerUsesLeft <= 0)
+      return quotaExhausted("REFILL_MATCHES", PRICES.REFILL_MATCHES);
     const b = body as { description: string };
     if (b.description.length > 2000) return err(400, "الوصف أطول من المسموح");
     quota.optimizerUsesLeft -= 1;
@@ -649,7 +702,12 @@ export function dispatch(
     if (!p) return err(404, "غير موجود");
     return quotaExhausted("BOOST_LISTING", PRICES.BOOST_LISTING);
   }
-  if (seg[0] === "landlord" && seg[1] === "properties" && seg[3] === "archive" && method === "POST") {
+  if (
+    seg[0] === "landlord" &&
+    seg[1] === "properties" &&
+    seg[3] === "archive" &&
+    method === "POST"
+  ) {
     if (!user) return unauth();
     const p = db.properties.find((x) => x.id === seg[2] && x.ownerId === user.id);
     if (!p) return err(404, "غير موجود");
@@ -709,7 +767,10 @@ export function dispatch(
           score: scoreRequestAgainstProperty(r, p),
         }));
         const best = scoredProps.length
-          ? scoredProps.reduce((best, curr) => (curr.score > best.score ? curr : best), scoredProps[0])
+          ? scoredProps.reduce(
+              (best, curr) => (curr.score > best.score ? curr : best),
+              scoredProps[0],
+            )
           : null;
 
         return {
@@ -724,10 +785,10 @@ export function dispatch(
           lifestyleRequirements: r.lifestyleRequirements,
           createdAt: r.createdAt,
           matchScore: best ? best.score : null,
-          alreadyOffered: db.offers.some((o) => o.tenantRequestId === r.id && o.ownerId === user.id),
-          bestMatchingProperty: best
-            ? { id: best.property.id, title: best.property.title }
-            : null,
+          alreadyOffered: db.offers.some(
+            (o) => o.tenantRequestId === r.id && o.ownerId === user.id,
+          ),
+          bestMatchingProperty: best ? { id: best.property.id, title: best.property.title } : null,
         };
       })
       .sort((a, b) => (b.matchScore ?? 0) - (a.matchScore ?? 0));
@@ -758,7 +819,9 @@ export function dispatch(
     if (!quota || quota.freeOffersLeft <= 0) return quotaExhausted("OFFER_PACK", PRICES.OFFER_PACK);
 
     const b = body as CreateOfferRequest;
-    const request = db.tenantRequests.find((r) => r.id === b.tenantRequestId && r.status === "APPROVED");
+    const request = db.tenantRequests.find(
+      (r) => r.id === b.tenantRequestId && r.status === "APPROVED",
+    );
     if (!request) return err(404, "الطلب غير متاح");
     const property = db.properties.find((p) => p.id === b.propertyId && p.ownerId === user.id);
     if (!property) return err(404, "العقار غير موجود");
@@ -835,7 +898,13 @@ export function dispatch(
     db.matchConnections.push(connection);
 
     const owner = db.users.find((u) => u.id === o.ownerId)!;
-    notify(owner.id, "NEW_MATCH", "تم قبول عرضك", "قبل المستأجر عرضك — بيانات التواصل متاحة الآن.", "/landlord/offers");
+    notify(
+      owner.id,
+      "NEW_MATCH",
+      "تم قبول عرضك",
+      "قبل المستأجر عرضك — بيانات التواصل متاحة الآن.",
+      "/landlord/offers",
+    );
     return ok({
       offerId: o.id,
       status: o.status,
@@ -866,9 +935,16 @@ export function dispatch(
   if (path === "/tenant/favorites" && method === "POST") {
     if (!user) return unauth();
     const b = body as { propertyId: string };
-    const existing = db.favorites.find((f) => f.tenantId === user.id && f.propertyId === b.propertyId);
+    const existing = db.favorites.find(
+      (f) => f.tenantId === user.id && f.propertyId === b.propertyId,
+    );
     if (existing) return ok({ favorited: true });
-    db.favorites.push({ id: nextId("fav"), tenantId: user.id, propertyId: b.propertyId, createdAt: new Date().toISOString() });
+    db.favorites.push({
+      id: nextId("fav"),
+      tenantId: user.id,
+      propertyId: b.propertyId,
+      createdAt: new Date().toISOString(),
+    });
     return ok({ favorited: true });
   }
   if (seg[0] === "tenant" && seg[1] === "favorites" && seg.length === 3 && method === "DELETE") {
@@ -882,76 +958,16 @@ export function dispatch(
     if (!user) return unauth();
     const q = quotaFor(user.id);
     // Tenants have no quota row — the UI must tolerate null.
-    return ok(q ? { freeListingsLeft: q.freeListingsLeft, optimizerUsesLeft: q.optimizerUsesLeft, freeOffersLeft: q.freeOffersLeft, lastResetDate: q.lastResetDate } : null);
-  }
-  if (path === "/payments/checkout" && method === "POST") {
-    if (!user) return unauth();
-    const b = body as CreateCheckoutRequest;
-    const payment = {
-      id: nextId("pay"),
-      userId: user.id,
-      paymobOrderId: nextId("pmob"),
-      paymobTransactionId: null,
-      amount: PRICES[b.paymentType],
-      currency: "EGP" as const,
-      paymentType: b.paymentType,
-      propertyId: b.propertyId,
-      status: "PENDING" as const,
-      paidAt: null,
-      createdAt: new Date().toISOString(),
-    };
-    db.payments.push(payment);
-    return ok({
-      paymobOrderId: payment.paymobOrderId,
-      amount: payment.amount,
-      currency: "EGP",
-      paymentType: payment.paymentType,
-      iframeUrl: null, // real build renders the Paymob iframe here
-    });
-  }
-  if (seg[0] === "payments" && seg[2] === "confirm" && method === "POST") {
-    if (!user) return unauth();
-    const payment = db.payments.find((p) => p.paymobOrderId === seg[1] && p.userId === user.id);
-    if (!payment) return err(404, "غير موجود");
-    const b = body as { cardNumber: string };
-    if (b.cardNumber.replace(/\s/g, "").endsWith("0000")) {
-      payment.status = "FAILED";
-      return ok({ paymobOrderId: payment.paymobOrderId, status: "FAILED" });
-    }
-    payment.status = "SUCCESS";
-    payment.paidAt = new Date().toISOString();
-    payment.paymobTransactionId = nextId("txn");
-    // The real webhook credits the quota — simulate its latency so the client
-    // must poll rather than trust its own success state (ASSUMPTIONS #17).
-    setTimeout(() => {
-      const q = quotaFor(payment.userId);
-      if (!q) return;
-      if (payment.paymentType === "NEW_LISTING") q.freeListingsLeft += 1;
-      if (payment.paymentType === "REFILL_MATCHES") q.optimizerUsesLeft += 2;
-      if (payment.paymentType === "OFFER_PACK") q.freeOffersLeft += 3;
-      if (payment.paymentType === "BOOST_LISTING" && payment.propertyId) {
-        const prop = db.properties.find((p) => p.id === payment.propertyId);
-        if (prop) prop.isBoosted = true;
-      }
-      notify(payment.userId, "PAYMENT_SUCCESS", "تم الدفع بنجاح", "تم تحديث رصيدك.");
-    }, 1200);
-    return ok({ paymobOrderId: payment.paymobOrderId, status: "SUCCESS" });
-  }
-  if (seg[0] === "payments" && seg.length === 2 && method === "GET") {
-    if (!user) return unauth();
-    const payment = db.payments.find((p) => p.paymobOrderId === seg[1] && p.userId === user.id);
-    if (!payment) return err(404, "غير موجود");
-    return ok({
-      id: payment.id,
-      paymobOrderId: payment.paymobOrderId,
-      paymobTransactionId: payment.paymobTransactionId,
-      amount: payment.amount,
-      currency: payment.currency,
-      paymentType: payment.paymentType,
-      status: payment.status,
-      paidAt: payment.paidAt,
-      createdAt: payment.createdAt,
-    });
+    return ok(
+      q
+        ? {
+            freeListingsLeft: q.freeListingsLeft,
+            optimizerUsesLeft: q.optimizerUsesLeft,
+            freeOffersLeft: q.freeOffersLeft,
+            lastResetDate: q.lastResetDate,
+          }
+        : null,
+    );
   }
 
   /* --------------------------- contracts (PRO-15) ------------------------ */
@@ -1029,8 +1045,12 @@ export function dispatch(
     const denied = requireAdmin();
     if (denied) return denied;
     const kycQueue = db.verifications.filter((v) => v.status === "PENDING").map(kycQueueItem);
-    const propertyQueue = db.properties.filter((p) => p.status === "PENDING").map(propertyQueueItem);
-    const requestQueue = db.tenantRequests.filter((r) => r.status === "PENDING").map(requestQueueItem);
+    const propertyQueue = db.properties
+      .filter((p) => p.status === "PENDING")
+      .map(propertyQueueItem);
+    const requestQueue = db.tenantRequests
+      .filter((r) => r.status === "PENDING")
+      .map(requestQueueItem);
     const reviewQueue = db.reviews.filter((r) => r.status === "PENDING").map(reviewQueueItem);
     return ok({ kycQueue, propertyQueue, requestQueue, reviewQueue });
   }
@@ -1062,7 +1082,8 @@ export function dispatch(
     v.reviewedBy = admin!.id;
     v.reviewedAt = new Date().toISOString();
     audit(admin!, `kyc:${b.decision} ${v.userId}`, v.userId);
-    if (b.decision === "approve") notify(v.userId, "EKYC_APPROVED", "تم توثيق هويتك", "يمكنك الآن استخدام كل المزايا.");
+    if (b.decision === "approve")
+      notify(v.userId, "EKYC_APPROVED", "تم توثيق هويتك", "يمكنك الآن استخدام كل المزايا.");
     return ok();
   }
   if (seg[0] === "admin" && seg[1] === "properties" && seg[3] === "review" && method === "POST") {
@@ -1081,7 +1102,13 @@ export function dispatch(
     audit(admin!, `property:${b.decision} ${p.id}`, p.id);
     // On approval the backend also embeds the text into ChromaDB (PRO-09).
     if (b.decision === "approve")
-      notify(p.ownerId, "PROPERTY_APPROVED", "تمت الموافقة على إعلانك", "أصبح إعلانك ظاهرًا للمستأجرين الآن.", `/landlord/properties/${p.id}`);
+      notify(
+        p.ownerId,
+        "PROPERTY_APPROVED",
+        "تمت الموافقة على إعلانك",
+        "أصبح إعلانك ظاهرًا للمستأجرين الآن.",
+        `/landlord/properties/${p.id}`,
+      );
     return ok({ status: p.status });
   }
   if (seg[0] === "admin" && seg[1] === "requests" && seg.length === 3 && method === "GET") {
@@ -1142,7 +1169,13 @@ export function dispatch(
       db.users
         .filter((u) => u.role === "landlord" && isVerified(u.id))
         .forEach((u) =>
-          notify(u.id, "NEW_TENANT_REQUEST", "طلب سكن جديد", "طلب جديد قد يطابق أحد عقاراتك.", "/landlord/requests"),
+          notify(
+            u.id,
+            "NEW_TENANT_REQUEST",
+            "طلب سكن جديد",
+            "طلب جديد قد يطابق أحد عقاراتك.",
+            "/landlord/requests",
+          ),
         );
     }
     return ok({ status: r.status });
@@ -1158,21 +1191,24 @@ export function dispatch(
     r.reviewedBy = admin!.id;
     audit(admin!, `review:${b.decision} ${r.id}`, r.id);
     if (b.decision === "approve")
-      notify(r.reviewerId, "REVIEW_APPROVED", "تم نشر تقييمك", "أصبح تقييمك ظاهرًا على صفحة العقار.");
+      notify(
+        r.reviewerId,
+        "REVIEW_APPROVED",
+        "تم نشر تقييمك",
+        "أصبح تقييمك ظاهرًا على صفحة العقار.",
+      );
     return ok({ status: r.status });
   }
   if (path === "/admin/stats" && method === "GET") {
     const denied = requireCap("payment:view");
     if (denied) return denied;
-    const successful = db.payments.filter((p) => p.status === "SUCCESS");
-    const live = successful.reduce((s, p) => s + p.amount, 0);
     const monthly = [
       { month: "فبراير", revenue: 4100, transactions: 31 },
       { month: "مارس", revenue: 3800, transactions: 28 },
       { month: "أبريل", revenue: 5200, transactions: 39 },
       { month: "مايو", revenue: 6100, transactions: 44 },
       { month: "يونيو", revenue: 5400, transactions: 41 },
-      { month: "يوليو", revenue: 3200 + live, transactions: 22 + successful.length },
+      { month: "يوليو", revenue: 3200, transactions: 22 },
     ];
     const pendingModeration =
       db.properties.filter((p) => p.status === "PENDING").length +
@@ -1188,8 +1224,14 @@ export function dispatch(
       },
       monthlyRevenue: monthly,
       moderationDistribution: [
-        { label: "تمت الموافقة", value: db.properties.filter((p) => p.status === "APPROVED").length },
-        { label: "قيد المراجعة", value: db.properties.filter((p) => p.status === "PENDING").length },
+        {
+          label: "تمت الموافقة",
+          value: db.properties.filter((p) => p.status === "APPROVED").length,
+        },
+        {
+          label: "قيد المراجعة",
+          value: db.properties.filter((p) => p.status === "PENDING").length,
+        },
         { label: "مرفوض", value: db.properties.filter((p) => p.status === "REJECTED").length },
       ],
     });
@@ -1206,7 +1248,8 @@ export function dispatch(
     const denied = requireCap("admin:create");
     if (denied) return denied;
     const b = body as CreateAdminRequest;
-    if (db.users.some((u) => u.email === b.email)) return err(409, "هذا البريد الإلكتروني مسجّل بالفعل");
+    if (db.users.some((u) => u.email === b.email))
+      return err(409, "هذا البريد الإلكتروني مسجّل بالفعل");
     const created: MockUser = {
       id: nextId("usr"),
       fullName: b.fullName,
@@ -1258,9 +1301,13 @@ export function dispatch(
     if (denied) return denied;
     // Append-only and read-only: there is deliberately no write/delete route.
     return ok({
-      items: db.auditLog
-        .slice(0, 50)
-        .map((e) => ({ id: e.id, actorName: e.actorName, action: e.action, subjectId: e.subjectId, at: e.at })),
+      items: db.auditLog.slice(0, 50).map((e) => ({
+        id: e.id,
+        actorName: e.actorName,
+        action: e.action,
+        subjectId: e.subjectId,
+        at: e.at,
+      })),
     });
   }
   if (path === "/admin/login-history" && method === "GET") {
