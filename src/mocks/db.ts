@@ -387,12 +387,7 @@ function seed(): MockDb {
     makeUser("usr_admin_readonly", "هبة السيد", "readonly@example.com", "admin", "01099993333", "read-only"),
   ];
 
-  const verifications: MockVerification[] = [
-    // usr_tenant has no row → NOT_SUBMITTED (progressive verification).
-    makeVerification("usr_tenant2", "APPROVED", "1234"),
-    makeVerification("usr_landlord", "APPROVED", "4821"),
-    makeVerification("usr_landlord2", "PENDING", "7715"), // sits in the admin queue
-  ];
+  const verifications: MockVerification[] = [];
 
   const quotas: MockQuota[] = [makeQuota("usr_landlord"), makeQuota("usr_landlord2")];
 
