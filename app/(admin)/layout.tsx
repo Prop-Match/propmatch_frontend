@@ -1,9 +1,8 @@
+import { AdminLogoutButton } from "@/src/components/nav/AdminLogoutButton";
 import { AdminNavLinks } from "@/src/components/nav/AdminNavLinks";
 import { NotificationBell } from "@/src/components/nav/RoleNav";
 import { Logo } from "@/src/components/ui/Logo";
 import { requireSession } from "@/src/lib/api/serverSession";
-import { LogOut } from "lucide-react";
-import Link from "next/link";
 import { redirect } from "next/navigation";
 
 /**
@@ -29,9 +28,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
           <div className="flex items-center gap-3">
             <NotificationBell />
             <span className="text-small font-semibold text-body-text">{user.fullName}</span>
-            <Link href="/" className="text-muted hover:text-ink" aria-label="خروج">
-              <LogOut className="size-5" aria-hidden />
-            </Link>
+            <AdminLogoutButton />
           </div>
         </div>
       </header>
