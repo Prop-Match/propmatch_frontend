@@ -15,6 +15,7 @@ import {
   type CreateTenantRequest,
 } from "@/src/lib/api/contracts/tenantRequest";
 import { propertyTypeLabels, type PropertyType } from "@/src/lib/api/contracts/property";
+import { VerificationGate } from "@/src/features/ekyc/components/VerificationGate";
 
 const defaults: CreateTenantRequest = {
   minBudget: 2000,
@@ -33,6 +34,14 @@ const defaults: CreateTenantRequest = {
  * SRS 3.2.2); nothing is published until then, so the success copy says so.
  */
 export function TenantRequestForm() {
+  return (
+    <VerificationGate verificationPath="/verify">
+      <TenantRequestFormContent />
+    </VerificationGate>
+  );
+}
+
+function TenantRequestFormContent() {
   const router = useRouter();
   const toast = useToast();
   const create = useCreateTenantRequest();
@@ -55,8 +64,7 @@ export function TenantRequestForm() {
       },
       onError: (e) => {
         if (e.code === "VERIFICATION_REQUIRED") {
-          toast("info", "وثّق هويتك أولًا لنشر طلبك");
-          router.push("/verify");
+          toast("info", e.message);
         } else {
           toast("error", e.message);
         }
@@ -131,7 +139,7 @@ export function TenantRequestForm() {
             <label className="flex cursor-pointer items-end gap-2 pb-3 text-small text-body-text">
               <input
                 type="checkbox"
-                className="size-4 accent-[var(--color-primary)]"
+                className="size-4 accent-primary"
                 {...register("needsFurnished")}
               />
               أحتاج وحدة مفروشة
@@ -190,7 +198,7 @@ function FlexibilitySlider({ value, onChange }: { value: number; onChange: (v: n
         step={1}
         value={value}
         onChange={(e) => onChange(Number(e.target.value))}
-        className="w-full accent-[var(--color-primary)]"
+        className="w-full accent-primary"
       />
       <div className="flex justify-between text-caption text-muted">
         <span>شروطي ثابتة</span>

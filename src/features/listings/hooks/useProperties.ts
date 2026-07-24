@@ -6,6 +6,7 @@ import type {
   PropertyDetail,
   PropertySearchQuery,
   PropertySummary,
+  SemanticPropertySearchInput,
 } from "@/src/lib/api/contracts/property";
 
 interface Paginated<T> {
@@ -32,6 +33,22 @@ export function useApprovedProperties(query: PropertySearchQuery) {
   return useQuery({
     queryKey: ["properties", "browse", query],
     queryFn: () => api.get<Paginated<PropertySummary>>(`properties${toSearchParams(query)}`),
+  });
+}
+
+/** Natural-language search for approved properties, triggered only on submit. */
+export function useSemanticPropertySearch(input: SemanticPropertySearchInput | null) {
+  const query = input?.query.trim() ?? "";
+  const limit = input?.limit ?? 10;
+
+  return useQuery({
+    queryKey: ["properties", "semantic-search", query, limit],
+    queryFn: () => {
+      const params = new URLSearchParams({ query: query ?? "", limit: String(limit) });
+      return api.get<Paginated<PropertySummary>>(`properties/search/semantic?${params.toString()}`);
+    },
+    enabled: query.length >= 2 && query.length <= 300 && limit >= 1 && limit <= 20,
+    retry: false,
   });
 }
 

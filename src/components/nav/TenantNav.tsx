@@ -1,6 +1,6 @@
 "use client";
 
-import { Search, FileText, Inbox, Heart, User as UserIcon } from "lucide-react";
+import { Search, FileText, Inbox, Heart, MessageCircle, User as UserIcon } from "lucide-react";
 import { RoleNav, NotificationBell } from "./RoleNav";
 
 /**
@@ -11,7 +11,8 @@ const items = [
   { href: "/tenant", label: "تصفّح", Icon: Search },
   { href: "/tenant/requests", label: "طلباتي", Icon: FileText },
   { href: "/tenant/offers", label: "العروض", Icon: Inbox },
-  { href: "/tenant/favorites", label: "المفضلة", Icon: Heart },
+    { href: "/tenant/messages", label: "الرسائل", Icon: MessageCircle },
+{ href: "/tenant/favorites", label: "المفضلة", Icon: Heart },
   { href: "/profile", label: "حسابي", Icon: UserIcon },
 ];
 

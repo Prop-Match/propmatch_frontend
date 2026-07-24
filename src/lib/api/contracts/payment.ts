@@ -1,15 +1,5 @@
 import { z } from "zod";
 
-/**
- * Mirrors the ERD's `PAYMENT_TRANSACTION` + `USER_QUOTA` (PRO-14/18).
- *
- * The client never talks to Paymob directly: it asks the backend for a
- * checkout, renders the Paymob iframe, and the **webhook** (HMAC-validated,
- * idempotent — backend duty) credits the quota. A client-side "success" means
- * *captured*, not *credited* — poll the quota afterwards (ASSUMPTIONS.md #17).
- */
-
-/** ERD: `payment_type ENUM "NEW_LISTING, BOOST_LISTING, REFILL_MATCHES, OFFER_PACK"`. */
 export const PaymentTypeSchema = z.enum([
   "NEW_LISTING",
   "BOOST_LISTING",
@@ -37,19 +27,18 @@ export const CreateCheckoutRequestSchema = z.object({
 export type CreateCheckoutRequest = z.infer<typeof CreateCheckoutRequestSchema>;
 
 export const CheckoutSessionSchema = z.object({
-  paymobOrderId: z.string(),
+  providerOrderId: z.string(),
   amount: z.number(),
   currency: z.literal("EGP"),
   paymentType: PaymentTypeSchema,
-  /** Paymob iframe URL the client renders. */
-  iframeUrl: z.string().nullable(),
+  checkoutUrl: z.string().nullable(),
 });
 export type CheckoutSession = z.infer<typeof CheckoutSessionSchema>;
 
 export const PaymentTransactionSchema = z.object({
   id: z.string(),
-  paymobOrderId: z.string(),
-  paymobTransactionId: z.string().nullable(),
+  providerOrderId: z.string(),
+  providerTransactionId: z.string().nullable(),
   amount: z.number(),
   currency: z.literal("EGP"),
   paymentType: PaymentTypeSchema,

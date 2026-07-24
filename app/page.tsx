@@ -1,6 +1,10 @@
-import Link from "next/link";
-import { ShieldCheck, Sparkles, FileText, Search, Home, BadgeCheck, ArrowLeft } from "lucide-react";
 import { Button } from "@/src/components/ui/Button";
+import { Logo } from "@/src/components/ui/Logo";
+import { landingAfterLogin } from "@/src/features/auth/roleRouting";
+import { getServerSession } from "@/src/lib/api/serverSession";
+import { ArrowLeft, BadgeCheck, FileText, Home, Search, ShieldCheck, Sparkles } from "lucide-react";
+import Link from "next/link";
+import { redirect } from "next/navigation";
 
 const steps = [
   { n: "١", title: "أنشئ حسابك", text: "سجّل كمستأجر أو مالك أو الاثنين في دقيقة." },
@@ -14,13 +18,17 @@ const trust = [
   { Icon: FileText, title: "عقد جاهز", text: "أنشئ عقد إيجار مصري قياسي وحمّله PDF مجانًا." },
 ];
 
-export default function LandingPage() {
+export default async function LandingPage() {
+  const user = await getServerSession();
+  if (user) {
+    redirect(landingAfterLogin(user.role));
+  }
   return (
     <div className="flex flex-col">
       {/* Top nav */}
       <header className="sticky top-0 z-30 border-b border-hairline bg-surface/90 backdrop-blur">
         <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3">
-          <span className="text-h2 font-bold text-primary">PropMatch AI</span>
+          <Logo href="/" />
           <div className="flex items-center gap-2">
             <Link href="/login">
               <Button variant="ghost" size="sm">

@@ -5,6 +5,7 @@ import { api, isApiClientError } from "@/src/lib/api/browserClient";
 import { usePollWhileOffline } from "@/src/lib/socket/RealtimeProvider";
 import type {
   AdminQueuesResponse,
+  AdminPropertyReviewDetail,
   AdminReviewDetail,
   AdminStats,
   AdminTenantRequestDetail,
@@ -37,6 +38,17 @@ export function useKycReview(userId: string) {
   return useQuery({
     queryKey: ["admin", "kyc", userId],
     queryFn: () => api.get<KycReviewDetail>(`admin/kyc/${userId}`),
+    staleTime: 0,
+    refetchOnMount: "always",
+  });
+}
+
+export function useAdminPropertyReview(propertyId: string) {
+  return useQuery({
+    queryKey: ["admin", "property", propertyId],
+    queryFn: () => api.get<AdminPropertyReviewDetail>(`admin/properties/${propertyId}`),
+    staleTime: 0,
+    refetchOnMount: "always",
   });
 }
 

@@ -1,11 +1,11 @@
 "use client";
 
-import Link from "next/link";
-import { usePathname } from "next/navigation";
-import { ClipboardCheck, BarChart3, Headset, Users, ScrollText } from "lucide-react";
-import { cn } from "@/src/utils/cn";
 import { useAdminSession } from "@/src/features/admin/hooks/useTeam";
 import type { Capability } from "@/src/lib/api/contracts/common";
+import { cn } from "@/src/utils/cn";
+import { BarChart3, ClipboardCheck, Globe, Headset, ScrollText, Users } from "lucide-react";
+import Link from "next/link";
+import { usePathname } from "next/navigation";
 
 interface AdminLink {
   href: string;
@@ -22,6 +22,7 @@ const links: AdminLink[] = [
   { href: "/admin/reports", label: "السجلات", Icon: BarChart3, exact: false, cap: "payment:view" },
   { href: "/admin/team", label: "الفريق", Icon: Users, exact: false, cap: "admin:manage" },
   { href: "/admin/activity", label: "السجل", Icon: ScrollText, exact: false, cap: "audit:view" },
+  { href: "/admin/settings/regions", label: "المناطق", Icon: Globe, exact: false, cap: "admin:manage" },
 ];
 
 /**

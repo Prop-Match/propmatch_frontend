@@ -5,6 +5,7 @@ import { Scale, Send, MessageCircle } from "lucide-react";
 import { streamPost } from "@/src/lib/api/browserClient";
 import { cn } from "@/src/utils/cn";
 import type { ChatMessage } from "@/src/lib/api/contracts/support";
+import { LegalMarkdown } from "./LegalMarkdown";
 
 const examples = [
   "ما هي مدة الإخطار قبل إنهاء العقد؟",
@@ -35,10 +36,7 @@ export function LegalChatbot() {
     setInput("");
 
     const replyId = `local_${localId++}`;
-    setMessages((m) => [
-      ...m,
-      { id: `local_${localId++}`, role: "user", content: trimmed },
-    ]);
+    setMessages((m) => [...m, { id: `local_${localId++}`, role: "user", content: trimmed }]);
     setTyping(true);
 
     let started = false;
@@ -61,7 +59,9 @@ export function LegalChatbot() {
       );
       // `declined` only arrives with the terminal chunk, so the off-topic
       // styling is applied once the answer is complete (SRS 3.3).
-      setMessages((m) => m.map((msg) => (msg.id === replyId ? { ...msg, declined: done.declined } : msg)));
+      setMessages((m) =>
+        m.map((msg) => (msg.id === replyId ? { ...msg, declined: done.declined } : msg)),
+      );
     } catch {
       setMessages((m) => [
         ...m.filter((msg) => msg.id !== replyId || msg.content),
@@ -84,11 +84,16 @@ export function LegalChatbot() {
         </div>
       </div>
 
-      <div ref={scrollRef} className="flex flex-1 flex-col gap-3 overflow-y-auto rounded-card border border-hairline bg-surface p-4">
+      <div
+        ref={scrollRef}
+        className="flex flex-1 flex-col gap-3 overflow-y-auto rounded-card border border-hairline bg-surface p-4"
+      >
         {messages.length === 0 && (
           <div className="flex flex-1 flex-col items-center justify-center gap-4 text-center">
             <MessageCircle className="size-10 text-muted" aria-hidden />
-            <p className="text-small text-muted">اسأل عن أي شيء يخص الإيجار والقانون العقاري في مصر</p>
+            <p className="text-small text-muted">
+              اسأل عن أي شيء يخص الإيجار والقانون العقاري في مصر
+            </p>
             <div className="flex flex-col gap-2">
               {examples.map((ex) => (
                 <button
@@ -104,10 +109,13 @@ export function LegalChatbot() {
         )}
 
         {messages.map((m) => (
-          <div key={m.id} className={cn("flex", m.role === "user" ? "justify-start" : "justify-end")}>
+          <div
+            key={m.id}
+            className={cn("flex", m.role === "user" ? "justify-start" : "justify-end")}
+          >
             <div
               className={cn(
-                "max-w-[85%] rounded-card px-4 py-2.5 text-body leading-relaxed",
+                "min-w-0 max-w-[85%] break-words rounded-card px-4 py-2.5 text-body leading-relaxed",
                 m.role === "user"
                   ? "bg-primary text-white"
                   : m.declined
@@ -115,7 +123,7 @@ export function LegalChatbot() {
                     : "bg-background text-ink",
               )}
             >
-              {m.content}
+              {m.role === "assistant" ? <LegalMarkdown content={m.content} /> : m.content}
             </div>
           </div>
         ))}
@@ -124,7 +132,11 @@ export function LegalChatbot() {
           <div className="flex justify-end">
             <div className="flex gap-1 rounded-card bg-background px-4 py-3">
               {[0, 1, 2].map((i) => (
-                <span key={i} className="size-2 animate-bounce rounded-full bg-muted" style={{ animationDelay: `${i * 0.15}s` }} />
+                <span
+                  key={i}
+                  className="size-2 animate-bounce rounded-full bg-muted"
+                  style={{ animationDelay: `${i * 0.15}s` }}
+                />
               ))}
             </div>
           </div>

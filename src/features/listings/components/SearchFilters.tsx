@@ -107,7 +107,7 @@ export function SearchFilters({ value, onChange }: SearchFiltersProps) {
         <label className="flex cursor-pointer items-center gap-2 text-small text-body-text">
           <input
             type="checkbox"
-            className="size-4 accent-[var(--color-primary)]"
+            className="size-4 accent-primary"
             checked={value.isFurnished ?? false}
             onChange={(e) => set("isFurnished", e.target.checked || undefined)}
           />

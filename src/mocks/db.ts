@@ -170,21 +170,6 @@ export interface MockReview {
   createdAt: string;
 }
 
-/** ERD: PAYMENT_TRANSACTION. */
-export interface MockPayment {
-  id: string;
-  userId: string;
-  paymobOrderId: string;
-  paymobTransactionId: string | null;
-  amount: number;
-  currency: "EGP";
-  paymentType: PaymentType;
-  propertyId?: string;
-  status: PaymentStatus;
-  paidAt: string | null;
-  createdAt: string;
-}
-
 /** ERD: LEASE_CONTRACT. */
 export interface MockLeaseContract {
   id: string;
@@ -276,7 +261,6 @@ export interface MockDb {
   favorites: MockFavorite[];
   matchConnections: MockMatchConnection[];
   reviews: MockReview[];
-  payments: MockPayment[];
   leaseContracts: MockLeaseContract[];
   partnerLeads: MockPartnerLead[];
   notifications: MockNotification[];
@@ -403,12 +387,7 @@ function seed(): MockDb {
     makeUser("usr_admin_readonly", "هبة السيد", "readonly@example.com", "admin", "01099993333", "read-only"),
   ];
 
-  const verifications: MockVerification[] = [
-    // usr_tenant has no row → NOT_SUBMITTED (progressive verification).
-    makeVerification("usr_tenant2", "APPROVED", "1234"),
-    makeVerification("usr_landlord", "APPROVED", "4821"),
-    makeVerification("usr_landlord2", "PENDING", "7715"), // sits in the admin queue
-  ];
+  const verifications: MockVerification[] = [];
 
   const quotas: MockQuota[] = [makeQuota("usr_landlord"), makeQuota("usr_landlord2")];
 
@@ -612,7 +591,6 @@ function seed(): MockDb {
     favorites: [],
     matchConnections: [],
     reviews,
-    payments: [],
     leaseContracts: [],
     partnerLeads: [],
     notifications: [],
@@ -665,13 +643,11 @@ export function tokensFor(user: MockUser) {
 }
 
 /**
- * Derives the 5-state UI status from the 3 persisted ones
- * (docs/analysis/conflicts.md A5).
+ * `NOT_SUBMITTED` is the only derived state: it means no verification row.
  */
 export function verificationStatusFor(userId: string) {
   const v = db.verifications.find((x) => x.userId === userId);
   if (!v) return "NOT_SUBMITTED" as const;
-  if (v.status === "REJECTED" && v.rejectionReason) return "RESUBMISSION_REQUIRED" as const;
   return v.status;
 }
 

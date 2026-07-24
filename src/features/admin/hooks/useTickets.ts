@@ -8,7 +8,6 @@ export function useTickets() {
   return useQuery({
     queryKey: ["admin", "tickets"],
     queryFn: () => api.get<{ items: TicketSummary[] }>("admin/tickets"),
-    refetchInterval: 5000,
   });
 }
 
@@ -16,7 +15,7 @@ export function useTicket(id: string) {
   return useQuery({
     queryKey: ["admin", "ticket", id],
     queryFn: () => api.get<TicketDetail>(`admin/tickets/${id}`),
-    refetchInterval: 5000,
+    enabled: Boolean(id),
   });
 }
 

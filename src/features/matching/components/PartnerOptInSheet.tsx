@@ -69,7 +69,7 @@ export function PartnerOptInSheet({ open, onClose }: { open: boolean; onClose: (
                 >
                   <input
                     type="checkbox"
-                    className="mt-1 size-4 accent-[var(--color-primary)]"
+                    className="mt-1 size-4 accent-primary"
                     checked={isSelected}
                     onChange={() => toggle(service)}
                   />

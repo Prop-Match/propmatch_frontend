@@ -1,6 +1,7 @@
 "use client";
 
 import Image from "next/image";
+import Link from "next/link";
 import { BedDouble, Bath, Ruler, Sofa, ArrowUpDown, Car, ImageOff, MapPin, Lock } from "lucide-react";
 import { useProperty } from "../hooks/useProperties";
 import { MatchScoreRing } from "@/src/components/ui/MatchScoreRing";
@@ -11,6 +12,7 @@ import { ErrorState } from "@/src/components/ui/States";
 import { formatNumber } from "@/src/utils/format";
 import { propertyTypeLabels } from "@/src/lib/api/contracts/property";
 import { PropertyReviews } from "./PropertyReviews";
+import { useSession } from "@/src/features/auth/hooks/useSession";
 
 export function PropertyDetailView({
   id,
@@ -92,6 +94,7 @@ export function PropertyDetailView({
 
         <VerifiedBadge status={p.ownerVerified ? "APPROVED" : "NOT_SUBMITTED"} />
         <OwnershipDisclaimer />
+        <TenantHousingRequestAction />
 
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
           {facts.map(({ Icon, label, value }) => (
@@ -131,6 +134,59 @@ export function PropertyDetailView({
         </aside>
       )}
     </div>
+  );
+}
+
+function TenantHousingRequestAction() {
+  const { data: user, isLoading } = useSession();
+
+  if (isLoading || user?.role === "landlord" || user?.role === "admin") return null;
+
+  if (!user) {
+    return (
+      <section className="flex flex-col gap-3 rounded-card border border-hairline bg-surface p-5">
+        <Link
+          href="/login?redirectTo=%2Ftenant%2Frequests%2Fnew"
+          className="inline-flex w-fit rounded-control bg-primary px-5 py-2.5 font-semibold text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+        >
+          سجّل الدخول لإنشاء طلب سكن
+        </Link>
+      </section>
+    );
+  }
+
+  if (user.verificationStatus === "APPROVED") {
+    return (
+      <section className="flex flex-col gap-3 rounded-card border border-primary/20 bg-primary-tint p-5">
+        <p className="text-small text-body-text">أنشئ طلبًا بمواصفات السكن التي تبحث عنها لتصلك عروض مناسبة من الملاك.</p>
+        <Link
+          href="/tenant/requests/new"
+          className="inline-flex w-fit rounded-control bg-primary px-5 py-2.5 font-semibold text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+        >
+          أنشئ طلب سكن
+        </Link>
+      </section>
+    );
+  }
+
+  const pending = user.verificationStatus === "PENDING";
+  const rejected = user.verificationStatus === "REJECTED" || user.verificationStatus === "RESUBMISSION_REQUIRED";
+  const message = pending
+    ? "طلب توثيق حسابك قيد المراجعة. ستتمكن من إنشاء طلب سكن بعد الموافقة عليه."
+    : rejected
+      ? "لم تتم الموافقة على توثيق حسابك. راجع سبب الرفض وأعد إرسال المستندات لتتمكن من إنشاء طلب سكن."
+      : "يجب توثيق حسابك أولًا قبل إنشاء طلب سكن.";
+
+  return (
+    <section className="flex flex-col gap-3 rounded-card border border-pending/30 bg-pending-tint p-5" aria-live="polite">
+      <p className="text-small text-body-text">{message}</p>
+      <Link
+        href="/verify"
+        className="inline-flex w-fit rounded-control bg-primary px-5 py-2.5 font-semibold text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+      >
+        {rejected ? "مراجعة التوثيق" : "توثيق الحساب"}
+      </Link>
+    </section>
   );
 }
 

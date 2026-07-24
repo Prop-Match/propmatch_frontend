@@ -9,6 +9,7 @@ import { VerifiedBadge } from "@/src/components/ui/VerifiedBadge";
 import { useToast } from "@/src/components/ui/Toast";
 import { formatEGP, formatNumber, formatDate } from "@/src/utils/format";
 import { propertyTypeLabels } from "@/src/lib/api/contracts/property";
+import { TenantRequestStatusChip } from "@/src/features/matching/components/StatusPills";
 import { useAdminTenantRequest, useReviewTenantRequest } from "../hooks/useAdmin";
 import { ModerationBar } from "./ModerationBar";
 
@@ -70,7 +71,8 @@ export function AdminRequestReview({ id }: { id: string }) {
 
         <div className="flex items-center gap-2 border-t border-hairline pt-3">
           <span className="text-small font-semibold text-ink">{request.tenantName}</span>
-          <VerifiedBadge status={request.tenantVerified ? "APPROVED" : "NOT_SUBMITTED"} />
+          <VerifiedBadge status={request.tenantVerificationStatus === "APPROVED" ? "APPROVED" : "NOT_SUBMITTED"} />
+          <TenantRequestStatusChip status={request.status} />
         </div>
 
         <dl className="grid gap-3 border-t border-hairline pt-3 text-small sm:grid-cols-3">

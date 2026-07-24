@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Bell, BellOff, BadgeCheck, Home, Sparkles, Star, CreditCard, FileText, Inbox } from "lucide-react";
+import { Bell, BellOff, BadgeCheck, Home, Sparkles, Star, CreditCard, FileText, Inbox, MessageCircle } from "lucide-react";
 import { api } from "@/src/lib/api/browserClient";
 import { cn } from "@/src/utils/cn";
 import { formatNumber, formatRelativeTime } from "@/src/utils/format";
@@ -24,12 +24,14 @@ const typeIcon: Record<NotificationType, typeof Bell> = {
   REVIEW_APPROVED: Star,
   NEW_TENANT_REQUEST: FileText,
   NEW_OFFER_RECEIVED: Inbox,
+  NEW_MESSAGE: MessageCircle,
 };
 
 export function NotificationBell() {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const qc = useQueryClient();
+  const notificationsEnabled = process.env.NEXT_PUBLIC_NOTIFICATIONS_ENABLED !== "false";
 
   // PRO-06: live over the socket; polls only while it's down.
   const refetchInterval = usePollWhileOffline(20_000);
@@ -37,7 +39,8 @@ export function NotificationBell() {
   const { data } = useQuery({
     queryKey: ["notifications"],
     queryFn: () => api.get<NotificationsResponse>("notifications"),
-    refetchInterval,
+    enabled: notificationsEnabled,
+    refetchInterval: notificationsEnabled ? refetchInterval : false,
   });
 
   // Read state is server-owned — the old build only flipped a local flag, so

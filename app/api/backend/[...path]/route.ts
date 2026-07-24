@@ -42,7 +42,9 @@ async function forward(request: NextRequest, path: string[], hasBody: boolean) {
 
   let body: unknown;
   if (hasBody) {
-    body = await request.json().catch(() => undefined);
+    body = request.headers.get("content-type")?.startsWith("multipart/form-data")
+      ? await request.formData()
+      : await request.json().catch(() => undefined);
   }
 
   try {

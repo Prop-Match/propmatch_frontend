@@ -1,17 +1,17 @@
 "use client";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
-import { ArrowRight, Bot, User as UserIcon, Send, StickyNote, UserPlus } from "lucide-react";
-import { useTicket, useTicketActions } from "../hooks/useTickets";
-import { Skeleton } from "@/src/components/ui/Skeleton";
-import { ErrorState } from "@/src/components/ui/States";
 import { Button } from "@/src/components/ui/Button";
 import { SelectField } from "@/src/components/ui/Field";
+import { Skeleton } from "@/src/components/ui/Skeleton";
+import { ErrorState } from "@/src/components/ui/States";
 import { useToast } from "@/src/components/ui/Toast";
+import { ticketStatusLabels, type TicketStatus } from "@/src/lib/api/contracts/support";
 import { cn } from "@/src/utils/cn";
 import { formatRelativeTime } from "@/src/utils/format";
-import { ticketStatusLabels, type TicketStatus } from "@/src/lib/api/contracts/support";
+import { ArrowRight, Bot, Send, StickyNote, User as UserIcon, UserPlus } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { useState } from "react";
+import { useTicket, useTicketActions } from "../hooks/useTickets";
 
 const statuses: TicketStatus[] = ["new", "assigned", "in_progress", "waiting", "closed"];
 
@@ -76,15 +76,20 @@ export function AdminTicketDetail({ id }: { id: string }) {
       {/* Thread */}
       <div className="flex flex-col gap-3 rounded-card border border-hairline bg-surface p-4">
         {ticket.messages.map((m) => {
-          const isUser = m.author === "user";
+          const authorVal = String(m.authorType || m.author || "").toLowerCase();
+          const isUser = authorVal === "user";
+          const isAdmin = authorVal === "admin";
+          const isAi = authorVal === "ai";
+          const timestamp = m.createdAt || m.at || new Date().toISOString();
+
           return (
             <div key={m.id} className={cn("flex", isUser ? "justify-start" : "justify-end")}>
               <div className={cn("flex max-w-[85%] flex-col gap-1", isUser ? "items-start" : "items-end")}>
                 <span className="flex items-center gap-1 text-caption text-muted">
-                  {m.author === "ai" ? <Bot className="size-3" aria-hidden /> : <UserIcon className="size-3" aria-hidden />}
+                  {isAi ? <Bot className="size-3" aria-hidden /> : <UserIcon className="size-3" aria-hidden />}
                   {m.authorName}
                   {m.internal && <span className="rounded bg-pending-tint px-1 text-pending">ملاحظة داخلية</span>}
-                  <span>· {formatRelativeTime(m.at)}</span>
+                  <span>· {formatRelativeTime(timestamp)}</span>
                 </span>
                 <div
                   className={cn(
@@ -93,7 +98,7 @@ export function AdminTicketDetail({ id }: { id: string }) {
                       ? "border border-dashed border-pending/40 bg-pending-tint/40 text-ink"
                       : isUser
                         ? "bg-background text-ink"
-                        : m.author === "admin"
+                        : isAdmin
                           ? "bg-primary text-white"
                           : "bg-primary-tint text-ink",
                   )}
@@ -116,7 +121,7 @@ export function AdminTicketDetail({ id }: { id: string }) {
         />
         <div className="flex items-center justify-between">
           <label className="flex cursor-pointer items-center gap-1.5 text-small text-body-text">
-            <input type="checkbox" checked={internal} onChange={(e) => setInternal(e.target.checked)} className="size-4 accent-[var(--color-primary)]" />
+            <input type="checkbox" checked={internal} onChange={(e) => setInternal(e.target.checked)} className="size-4 accent-primary" />
             <StickyNote className="size-4 text-muted" aria-hidden />
             ملاحظة داخلية
           </label>

@@ -114,3 +114,8 @@ export const PropertySearchQuerySchema = z.object({
   isFurnished: z.boolean().optional(),
 });
 export type PropertySearchQuery = z.infer<typeof PropertySearchQuerySchema>;
+
+export type SemanticPropertySearchInput = {
+  query: string;
+  limit?: number;
+};

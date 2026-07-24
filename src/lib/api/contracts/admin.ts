@@ -122,13 +122,41 @@ export type ReviewDecision = z.infer<typeof ReviewDecisionSchema>;
 export const KycReviewDetailSchema = z.object({
   userId: z.string(),
   userName: z.string(),
-  nationalId: z.string(),
-  nationalIdFrontUrl: z.string(),
-  nationalIdBackUrl: z.string(),
-  selfieUrl: z.string(),
+  nationalId: z.string().nullable(),
+  nationalIdFrontUrl: z.string().url().refine((value) => /^https?:\/\//.test(value)),
+  nationalIdBackUrl: z.string().url().refine((value) => /^https?:\/\//.test(value)),
+  selfieUrl: z.string().url().refine((value) => /^https?:\/\//.test(value)),
   submittedAt: z.string(),
 });
 export type KycReviewDetail = z.infer<typeof KycReviewDetailSchema>;
+
+/** Safe, admin-only projection used to moderate a property listing. */
+export const AdminPropertyReviewDetailSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  description: z.string(),
+  governorate: z.string(),
+  city: z.string(),
+  district: z.string(),
+  manualAddress: z.string(),
+  propertyType: PropertyTypeSchema,
+  rentAmount: z.number(),
+  areaM2: z.number(),
+  bedrooms: z.number().int(),
+  bathrooms: z.number().int(),
+  isFurnished: z.boolean(),
+  hasElevator: z.boolean(),
+  hasParking: z.boolean(),
+  propertyAroundServices: z.string().nullable(),
+  status: ModerationStatusSchema,
+  createdAt: z.string(),
+  images: z.array(z.object({
+    id: z.string(), imageUrl: z.string(), displayOrder: z.number().int(), isCover: z.boolean(),
+  })),
+  ownerName: z.string(),
+  ownerVerificationStatus: z.string(),
+});
+export type AdminPropertyReviewDetail = z.infer<typeof AdminPropertyReviewDetailSchema>;
 
 /**
  * Tenant-request moderation detail (PRO-08). The admin *does* see the tenant's
@@ -139,7 +167,7 @@ export type KycReviewDetail = z.infer<typeof KycReviewDetailSchema>;
 export const AdminTenantRequestDetailSchema = z.object({
   id: z.string(),
   tenantName: z.string(),
-  tenantVerified: z.boolean(),
+  tenantVerificationStatus: z.string(),
   minBudget: z.number(),
   maxBudget: z.number(),
   preferredLocations: z.string(),
