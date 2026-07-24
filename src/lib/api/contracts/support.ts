@@ -2,13 +2,7 @@ import { z } from "zod";
 
 /**
  * Legal Support Chatbot (PRO-17 / SRS 3.3). RAG over Egyptian tenancy law +
- * platform T&Cs, with a strict on-topic guardrail. Session-scoped: no ERD
- * entity persists chat, so history lives only in the client session.
- *
- * Customer-support ticketing (below) was deleted in Phase 2 as out-of-scope
- * and restored by explicit request — see `docs/analysis/conflicts.md` B2-R.
- * It has **no ERD entity and no PRO ticket**: the shapes here are a frontend
- * proposal, not an agreed backend contract (`ASSUMPTIONS.md` #26).
+ * platform T&Cs, with a strict on-topic guardrail. Session-scoped.
  */
 
 export const ChatRoleSchema = z.enum(["user", "assistant"]);
@@ -29,13 +23,21 @@ export const ChatRequestSchema = z.object({
 export type ChatRequest = z.infer<typeof ChatRequestSchema>;
 
 /* ----------------------------- support tickets ---------------------------- */
-/* Restored per conflicts.md B2-R. No ERD entity backs any of this.           */
+/* Aligned directly with backend Prisma schema (`SupportTicket` & `SupportMessage`) */
 
-/** Lifecycle: new → assigned → in_progress → waiting → closed. */
-export const TicketStatusSchema = z.enum(["new", "assigned", "in_progress", "waiting", "closed"]);
+/** Lifecycle: NEW → ASSIGNED → IN_PROGRESS → WAITING → CLOSED (supports upper & lower). */
+export const TicketStatusSchema = z.enum([
+  "NEW", "ASSIGNED", "IN_PROGRESS", "WAITING", "CLOSED",
+  "new", "assigned", "in_progress", "waiting", "closed",
+]);
 export type TicketStatus = z.infer<typeof TicketStatusSchema>;
 
-export const ticketStatusLabels: Record<TicketStatus, string> = {
+export const ticketStatusLabels: Record<string, string> = {
+  NEW: "جديد",
+  ASSIGNED: "معيّن",
+  IN_PROGRESS: "قيد المعالجة",
+  WAITING: "بانتظار العميل",
+  CLOSED: "مغلق",
   new: "جديد",
   assigned: "معيّن",
   in_progress: "قيد المعالجة",
@@ -43,26 +45,53 @@ export const ticketStatusLabels: Record<TicketStatus, string> = {
   closed: "مغلق",
 };
 
-/** Who authored a message. `internal` admin notes never reach the customer. */
-export const SupportAuthorSchema = z.enum(["ai", "user", "admin"]);
+/** Support Priority: LOW, NORMAL, HIGH, URGENT, CRITICAL (supports upper & lower). */
+export const SupportPrioritySchema = z.enum([
+  "LOW", "NORMAL", "HIGH", "URGENT", "CRITICAL",
+  "low", "normal", "high", "urgent", "critical",
+]);
+export type SupportPriority = z.infer<typeof SupportPrioritySchema>;
+
+export const priorityLabels: Record<string, string> = {
+  LOW: "منخفضة",
+  NORMAL: "عادية",
+  HIGH: "مرتفعة",
+  URGENT: "عاجلة",
+  CRITICAL: "حرجة جداً",
+  low: "منخفضة",
+  normal: "عادية",
+  high: "مرتفعة",
+  urgent: "عاجلة",
+  critical: "حرجة جداً",
+};
+
+/** Who authored a message: AI, USER, ADMIN (supports upper & lower). */
+export const SupportAuthorSchema = z.enum([
+  "AI", "USER", "ADMIN",
+  "ai", "user", "admin",
+]);
 export type SupportAuthor = z.infer<typeof SupportAuthorSchema>;
 
 export const SupportMessageSchema = z.object({
   id: z.string(),
-  author: SupportAuthorSchema,
+  authorType: SupportAuthorSchema.optional(),
+  author: SupportAuthorSchema.optional(),
   authorName: z.string(),
   content: z.string(),
-  internal: z.boolean(),
-  at: z.string(),
+  internal: z.boolean().default(false),
+  createdAt: z.string().optional(),
+  at: z.string().optional(),
 });
 export type SupportMessage = z.infer<typeof SupportMessageSchema>;
 
 export const TicketSummarySchema = z.object({
   id: z.string(),
-  subject: z.string(),
-  userName: z.string(),
+  subject: z.string().optional().default("تذكرة دعم فني"),
+  userName: z.string().optional(),
   status: TicketStatusSchema,
-  assignedAdminName: z.string().nullable(),
+  assignedAdminName: z.string().nullable().optional(),
+  priority: SupportPrioritySchema.optional(),
+  escalationReason: z.string().nullable().optional(),
   lastMessageAt: z.string(),
   createdAt: z.string(),
 });
@@ -70,7 +99,8 @@ export type TicketSummary = z.infer<typeof TicketSummarySchema>;
 
 export const TicketDetailSchema = TicketSummarySchema.extend({
   userId: z.string(),
-  assignedAdminId: z.string().nullable(),
+  assignedAdminId: z.string().nullable().optional(),
+  aiSummary: z.string().nullable().optional(),
   messages: z.array(SupportMessageSchema),
 });
 export type TicketDetail = z.infer<typeof TicketDetailSchema>;
