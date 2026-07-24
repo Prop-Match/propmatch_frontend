@@ -32,16 +32,21 @@ function readBody(req: IncomingMessage): Promise<unknown> {
 
 async function handle(req: IncomingMessage, res: ServerResponse) {
   const url = new URL(req.url ?? "/", "http://localhost");
+  // The real NestJS backend serves under the `/api` global prefix; the mock's
+  // router uses bare paths (`/auth/login`). Strip a leading `/api` so ONE
+  // NESTJS_API_URL (`http://localhost:3001/api`) works against both the mock
+  // and the real backend — see .env.example.
+  const pathname = url.pathname.replace(/^\/api(?=\/|$)/, "") || "/";
   const body = req.method === "GET" || req.method === "HEAD" ? undefined : await readBody(req);
   const method = req.method ?? "GET";
   const auth = req.headers.authorization ?? null;
 
   // Streaming routes (PRO-10/17) come first; dispatchStream returns null for
   // everything else, so the normal dispatcher still owns the rest of the API.
-  const streamed = dispatchStream(method, url.pathname, auth, body);
+  const streamed = dispatchStream(method, pathname, auth, body);
   if (streamed) return sendStream(res, streamed);
 
-  const result = dispatch(method, url.pathname, url.searchParams, auth, body);
+  const result = dispatch(method, pathname, url.searchParams, auth, body);
   res.writeHead(result.status, { "content-type": "application/json; charset=utf-8" });
   res.end(JSON.stringify(result.body));
 }
